@@ -387,6 +387,13 @@ footer {
   color: var(--muted);
 }
 
+.version {
+  font-size: 0.7rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(15, 23, 42, 0.45);
+}
+
 @keyframes riseIn {
   from {
     opacity: 0;
