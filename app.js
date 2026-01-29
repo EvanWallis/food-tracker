@@ -6,8 +6,11 @@ const entriesList = document.querySelector("#entries");
 const emptyState = document.querySelector("#empty");
 const todayCount = document.querySelector("#today-count");
 const todayWhole = document.querySelector("#today-whole");
+const alltimeWhole = document.querySelector("#alltime-whole");
+const streakCount = document.querySelector("#streak-count");
 const goalText = document.querySelector("#goal-text");
 const wholeProgress = document.querySelector("#whole-progress");
+const alltimeProgress = document.querySelector("#alltime-progress");
 const filters = document.querySelectorAll(".filter");
 const clearToday = document.querySelector("#clear-today");
 const exportBtn = document.querySelector("#export");
@@ -15,11 +18,10 @@ const wholeSlider = document.querySelector("input[name='wholePercent']");
 const wholeValue = document.querySelector("#whole-value");
 const chips = document.querySelectorAll(".chip");
 
-const now = new Date();
-
 const setDefaultTime = () => {
   const timeInput = form.elements.time;
   if (!timeInput.value) {
+    const now = new Date();
     const hours = String(now.getHours()).padStart(2, "0");
     const minutes = String(now.getMinutes()).padStart(2, "0");
     timeInput.value = `${hours}:${minutes}`;
@@ -44,9 +46,17 @@ const formatDate = (dateStr) => {
   });
 };
 
+const getDayKey = (date) => {
+  const local = new Date(date);
+  const year = local.getFullYear();
+  const month = String(local.getMonth() + 1).padStart(2, "0");
+  const day = String(local.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const calculateTodayStats = (entries) => {
-  const today = new Date().toDateString();
-  const todayEntries = entries.filter((entry) => new Date(entry.date).toDateString() === today);
+  const todayKey = getDayKey(new Date());
+  const todayEntries = entries.filter((entry) => getDayKey(entry.date) === todayKey);
   const avgWhole = todayEntries.length
     ? Math.round(todayEntries.reduce((sum, entry) => sum + entry.wholePercent, 0) / todayEntries.length)
     : 0;
@@ -55,6 +65,53 @@ const calculateTodayStats = (entries) => {
   todayWhole.textContent = `${avgWhole}%`;
   wholeProgress.style.width = `${Math.min(avgWhole, 100)}%`;
   goalText.textContent = avgWhole >= WHOLE_GOAL ? "Goal met ✅" : `Goal: ${WHOLE_GOAL}%`;
+};
+
+const calculateAllTimeAverage = (entries) => {
+  if (!entries.length) {
+    alltimeWhole.textContent = "0%";
+    alltimeProgress.style.width = "0%";
+    return;
+  }
+  const avgWhole = Math.round(
+    entries.reduce((sum, entry) => sum + entry.wholePercent, 0) / entries.length
+  );
+  alltimeWhole.textContent = `${avgWhole}%`;
+  alltimeProgress.style.width = `${Math.min(avgWhole, 100)}%`;
+};
+
+const calculateStreak = (entries) => {
+  if (!entries.length) {
+    streakCount.textContent = "0";
+    return;
+  }
+
+  const dailyTotals = new Map();
+  entries.forEach((entry) => {
+    const key = getDayKey(entry.date);
+    const current = dailyTotals.get(key) || { sum: 0, count: 0 };
+    current.sum += entry.wholePercent;
+    current.count += 1;
+    dailyTotals.set(key, current);
+  });
+
+  const dayKeys = Array.from(dailyTotals.keys()).sort();
+  let streak = 0;
+  let cursor = new Date();
+
+  while (true) {
+    const key = getDayKey(cursor);
+    const stats = dailyTotals.get(key);
+    const avg = stats ? Math.round(stats.sum / stats.count) : 0;
+    if (avg >= WHOLE_GOAL) {
+      streak += 1;
+      cursor.setDate(cursor.getDate() - 1);
+    } else {
+      break;
+    }
+  }
+
+  streakCount.textContent = String(streak);
 };
 
 const renderEntries = (entries) => {
@@ -111,6 +168,8 @@ const filterEntries = (entries, range) => {
 const refresh = (range = "today") => {
   const entries = loadEntries().sort((a, b) => new Date(b.dateTime) - new Date(a.dateTime));
   calculateTodayStats(entries);
+  calculateAllTimeAverage(entries);
+  calculateStreak(entries);
   renderEntries(filterEntries(entries, range));
 };
 
