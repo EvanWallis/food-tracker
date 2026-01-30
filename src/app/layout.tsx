@@ -17,8 +17,15 @@ const fraunces = Fraunces({
 export const metadata: Metadata = {
   title: "Food Tracker",
   description: "Log meals and track whole foods percentage.",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Food Tracker",
+  },
   icons: {
     icon: "/icon.svg",
+    apple: "/icon.svg",
   },
 };
 

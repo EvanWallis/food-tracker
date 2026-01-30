@@ -9,6 +9,15 @@ const nextConfig = {
       "@libsql/isomorphic-fetch",
     ],
   },
+  async redirects() {
+    return [
+      {
+        source: "/index.html",
+        destination: "/",
+        permanent: false,
+      },
+    ];
+  },
 };
 
 module.exports = nextConfig;
