@@ -1,24 +1,37 @@
 # Food Tracker
 
-Simple offline-first food log with a daily whole-foods target.
+Mobile-first Food Tracker powered by a Gemini estimate of whole foods percentage.
 
-## Local preview
+## Local setup
 
 ```sh
-cd /Users/evanwallis/Coding Projects/food-tracker
-python3 -m http.server 8080
+npm install
+cp .env.example .env
 ```
 
-Open http://localhost:8080.
+Edit `.env` and add your `GEMINI_API_KEY`. (Do not commit your key.)
 
-## Deploy
+Run the database migration:
+
+```sh
+npx prisma migrate dev --name init
+```
+
+Start the dev server:
+
+```sh
+npm run dev
+```
+
+## Production (Vercel)
+
+This app uses SQLite via Prisma. For production persistence on Vercel, use a hosted SQLite provider (e.g. Turso/libSQL) and set:
+
+- `DATABASE_URL`
+- `GEMINI_API_KEY`
+
+Then deploy:
 
 ```sh
 vercel --prod
 ```
-
-## Add to home screen (iPhone)
-1. Open the deployed URL in Safari.
-2. Share → Add to Home Screen.
-
-Data is saved locally on this device.

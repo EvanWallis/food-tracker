@@ -1,0 +1,26 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model MealEntry {
+  id                String   @id @default(cuid())
+  mealText          String
+  timestamp         DateTime
+  mood              String
+  wholeFoodsPercent Int
+  llmReason         String
+  notes             String?
+  sizeLabel         String?
+  sizeWeight        Float?
+  createdAt         DateTime @default(now())
+}
+
+model Settings {
+  id          Int @id @default(1)
+  goalPercent Int @default(80)
+}
