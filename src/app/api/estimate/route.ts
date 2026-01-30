@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { GoogleGenAI, SchemaType } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 
 const MODEL = "gemini-2.0-flash";
 
@@ -40,36 +40,32 @@ Meal: "${mealText}"
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
   try {
+    const responseSchema = {
+      type: "object",
+      properties: {
+        percent: { type: "number" },
+        reason: { type: "string" },
+        whole_foods_items: { type: "array", items: { type: "string" } },
+        non_whole_foods_items: { type: "array", items: { type: "string" } },
+        size_label: { type: "string" },
+        size_weight: { type: "number" },
+      },
+      required: [
+        "percent",
+        "reason",
+        "whole_foods_items",
+        "non_whole_foods_items",
+        "size_label",
+        "size_weight",
+      ],
+    } as const;
+
     const response = await ai.models.generateContent({
       model: MODEL,
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       config: {
         responseMimeType: "application/json",
-        responseSchema: {
-          type: SchemaType.OBJECT,
-          properties: {
-            percent: { type: SchemaType.NUMBER },
-            reason: { type: SchemaType.STRING },
-            whole_foods_items: {
-              type: SchemaType.ARRAY,
-              items: { type: SchemaType.STRING },
-            },
-            non_whole_foods_items: {
-              type: SchemaType.ARRAY,
-              items: { type: SchemaType.STRING },
-            },
-            size_label: { type: SchemaType.STRING },
-            size_weight: { type: SchemaType.NUMBER },
-          },
-          required: [
-            "percent",
-            "reason",
-            "whole_foods_items",
-            "non_whole_foods_items",
-            "size_label",
-            "size_weight",
-          ],
-        },
+        responseSchema: responseSchema as unknown as Record<string, unknown>,
       },
     });
 
