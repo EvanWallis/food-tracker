@@ -26,38 +26,10 @@ type Estimate = {
 
 type Draft = {
   mealText: string;
-  time: string;
-  mood: string;
   wholeFoodsPercent: number;
-  notes: string;
   llmReason: string;
   sizeLabel: string | null;
   sizeWeight: number | null;
-};
-
-type EditDraft = {
-  id: string;
-  mealText: string;
-  time: string;
-  mood: string;
-  wholeFoodsPercent: number;
-  notes: string;
-  baseDate: Date;
-};
-
-const MOODS = ["Great", "Good", "Neutral", "Bad"];
-
-const getTimeValue = (date: Date) => {
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${hours}:${minutes}`;
-};
-
-const buildTimestamp = (timeValue: string, baseDate = new Date()) => {
-  const [hours, minutes] = timeValue.split(":").map(Number);
-  const next = new Date(baseDate);
-  next.setHours(hours || 0, minutes || 0, 0, 0);
-  return next;
 };
 
 const formatDisplayTime = (value: string) => {
@@ -88,13 +60,9 @@ const weightedAverage = (entries: MealEntry[]) => {
 export default function Home() {
   const [entries, setEntries] = useState<MealEntry[]>([]);
   const [goalPercent, setGoalPercent] = useState(80);
-  const [goalSaving, setGoalSaving] = useState(false);
   const [draft, setDraft] = useState<Draft>(() => ({
     mealText: "",
-    time: getTimeValue(new Date()),
-    mood: "Good",
     wholeFoodsPercent: 80,
-    notes: "",
     llmReason: "",
     sizeLabel: null,
     sizeWeight: null,
@@ -103,8 +71,6 @@ export default function Home() {
   const [readyToSave, setReadyToSave] = useState(false);
   const [isEstimating, setIsEstimating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
 
   const loadData = async () => {
     const [entriesResponse, settingsResponse] = await Promise.all([
@@ -169,10 +135,7 @@ export default function Home() {
   const resetDraft = () => {
     setDraft({
       mealText: "",
-      time: getTimeValue(new Date()),
-      mood: "Good",
       wholeFoodsPercent: 80,
-      notes: "",
       llmReason: "",
       sizeLabel: null,
       sizeWeight: null,
@@ -231,10 +194,10 @@ export default function Home() {
 
     const payload = {
       mealText,
-      timestamp: buildTimestamp(draft.time).toISOString(),
-      mood: draft.mood,
+      timestamp: new Date().toISOString(),
+      mood: "Neutral",
       wholeFoodsPercent: draft.wholeFoodsPercent,
-      notes: draft.notes.trim() ? draft.notes.trim() : null,
+      notes: null,
       llmReason: draft.llmReason,
       sizeLabel: draft.sizeLabel,
       sizeWeight: draft.sizeWeight,
@@ -273,51 +236,11 @@ export default function Home() {
   };
 
   const handleGoalSave = async () => {
-    setGoalSaving(true);
     await fetch("/api/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ goalPercent }),
     });
-    setGoalSaving(false);
-  };
-
-  const startEdit = (entry: MealEntry) => {
-    setEditingId(entry.id);
-    setEditDraft({
-      id: entry.id,
-      mealText: entry.mealText,
-      time: getTimeValue(new Date(entry.timestamp)),
-      mood: entry.mood,
-      wholeFoodsPercent: entry.wholeFoodsPercent,
-      notes: entry.notes ?? "",
-      baseDate: new Date(entry.timestamp),
-    });
-  };
-
-  const cancelEdit = () => {
-    setEditingId(null);
-    setEditDraft(null);
-  };
-
-  const saveEdit = async () => {
-    if (!editDraft) return;
-    const response = await fetch(`/api/entries/${editDraft.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        mealText: editDraft.mealText.trim(),
-        mood: editDraft.mood,
-        notes: editDraft.notes.trim() ? editDraft.notes.trim() : null,
-        wholeFoodsPercent: editDraft.wholeFoodsPercent,
-        timestamp: buildTimestamp(editDraft.time, editDraft.baseDate).toISOString(),
-      }),
-    });
-
-    if (response.ok) {
-      await loadData();
-      cancelEdit();
-    }
   };
 
   const deleteEntry = async (id: string) => {
@@ -338,24 +261,26 @@ export default function Home() {
           <p className="text-sm text-inkSoft">Log meals. Hit 80% whole foods.</p>
         </header>
 
-        <section className="grid gap-3 rounded-2xl border border-line bg-white/90 p-4 shadow-soft">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl border border-line bg-white p-3">
-              <p className="text-xs uppercase tracking-[0.25em] text-inkSoft">Today</p>
-              <p className="mt-2 text-3xl font-semibold text-ink">{todayEntries.length}</p>
-              <p className="text-xs text-inkSoft">entries</p>
+        <section className="rounded-xl border border-line bg-white/70 px-3 py-3">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="rounded-lg border border-line/70 bg-white/80 px-2 py-2">
+              <p className="text-[10px] uppercase tracking-[0.25em] text-inkSoft/70">
+                Entries
+              </p>
+              <p className="mt-1 text-xl font-semibold text-ink">{todayEntries.length}</p>
             </div>
-            <div className="rounded-xl border border-line bg-white p-3">
-              <p className="text-xs uppercase tracking-[0.25em] text-inkSoft">Streak</p>
-              <p className="mt-2 text-3xl font-semibold text-ink">{streak}</p>
-              <p className="text-xs text-inkSoft">days ≥ goal</p>
+            <div className="rounded-lg border border-line/70 bg-white/80 px-2 py-2">
+              <p className="text-[10px] uppercase tracking-[0.25em] text-inkSoft/70">
+                Streak
+              </p>
+              <p className="mt-1 text-xl font-semibold text-ink">{streak}</p>
             </div>
-            <div className="rounded-xl border border-line bg-white p-3">
-              <div className="flex items-center justify-between">
-                <p className="text-xs uppercase tracking-[0.25em] text-inkSoft">
-                  Whole Foods
+            <div className="rounded-lg border border-line/70 bg-white/80 px-2 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] uppercase tracking-[0.25em] text-inkSoft/70">
+                  Today %
                 </p>
-                <div className="flex items-center gap-2 text-xs text-inkSoft">
+                <div className="flex items-center gap-1 text-[10px] text-inkSoft/70">
                   <span>Goal</span>
                   <input
                     type="number"
@@ -366,32 +291,27 @@ export default function Home() {
                       setGoalPercent(Math.min(100, Math.max(0, Number(event.target.value) || 0)))
                     }
                     onBlur={handleGoalSave}
-                    className="w-14 rounded-full border border-line bg-white px-2 py-1 text-right text-xs"
+                    className="w-12 rounded-full border border-line bg-white px-2 py-0.5 text-right text-base"
                   />
                   <span>%</span>
-                  <button
-                    type="button"
-                    onClick={handleGoalSave}
-                    className="rounded-full border border-line px-2 py-1 text-[10px] uppercase tracking-[0.2em]"
-                  >
-                    {goalSaving ? "Saving" : "Update"}
-                  </button>
                 </div>
               </div>
-              <p className="mt-2 text-3xl font-semibold text-ink">{todayAverage}%</p>
-              <div className="mt-2 h-2 w-full rounded-full bg-line/50">
+              <p className="mt-1 text-xl font-semibold text-ink">{todayAverage}%</p>
+              <div className="mt-1 h-1.5 w-full rounded-full bg-line/40">
                 <div
-                  className="h-2 rounded-full bg-gradient-to-r from-accent to-teal-400"
+                  className="h-1.5 rounded-full bg-gradient-to-r from-accent to-teal-400"
                   style={{ width: `${Math.min(todayAverage, 100)}%` }}
                 />
               </div>
             </div>
-            <div className="rounded-xl border border-line bg-white p-3">
-              <p className="text-xs uppercase tracking-[0.25em] text-inkSoft">All-time Avg</p>
-              <p className="mt-2 text-3xl font-semibold text-ink">{allTimeAverage}%</p>
-              <div className="mt-2 h-2 w-full rounded-full bg-line/50">
+            <div className="rounded-lg border border-line/70 bg-white/80 px-2 py-2">
+              <p className="text-[10px] uppercase tracking-[0.25em] text-inkSoft/70">
+                All-time %
+              </p>
+              <p className="mt-1 text-xl font-semibold text-ink">{allTimeAverage}%</p>
+              <div className="mt-1 h-1.5 w-full rounded-full bg-line/40">
                 <div
-                  className="h-2 rounded-full bg-gradient-to-r from-teal-500 to-emerald-400"
+                  className="h-1.5 rounded-full bg-gradient-to-r from-teal-500 to-emerald-400"
                   style={{ width: `${Math.min(allTimeAverage, 100)}%` }}
                 />
               </div>
@@ -401,89 +321,27 @@ export default function Home() {
 
         <section className="rounded-2xl border border-line bg-white/90 p-4 shadow-soft">
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex flex-col gap-2 text-xs uppercase tracking-[0.2em] text-inkSoft">
-                Meal
-                <input
-                  type="text"
-                  value={draft.mealText}
-                  onChange={(event) => handleMealChange(event.target.value)}
-                  placeholder="e.g., Chicken bowl"
-                  required
-                  className="rounded-xl border border-line bg-white px-3 py-2 text-sm text-ink"
-                />
-              </label>
-              <label className="flex flex-col gap-2 text-xs uppercase tracking-[0.2em] text-inkSoft">
-                When
-                <input
-                  type="time"
-                  value={draft.time}
-                  onChange={(event) =>
-                    setDraft((prev) => ({ ...prev, time: event.target.value }))
-                  }
-                  required
-                  className="rounded-xl border border-line bg-white px-3 py-2 text-sm text-ink"
-                />
-              </label>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex flex-col gap-2 text-xs uppercase tracking-[0.2em] text-inkSoft">
-                Mood
-                <select
-                  value={draft.mood}
-                  onChange={(event) =>
-                    setDraft((prev) => ({ ...prev, mood: event.target.value }))
-                  }
-                  className="rounded-xl border border-line bg-white px-3 py-2 text-sm text-ink"
-                >
-                  {MOODS.map((mood) => (
-                    <option key={mood} value={mood}>
-                      {mood}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="flex flex-col gap-2">
-                <label className="flex items-center justify-between text-xs uppercase tracking-[0.2em] text-inkSoft">
-                  Whole foods %
-                  <span className="text-sm font-semibold text-accentDeep">
-                    {draft.wholeFoodsPercent}%
-                  </span>
-                </label>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="5"
-                  value={draft.wholeFoodsPercent}
-                  onChange={(event) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      wholeFoodsPercent: Number(event.target.value),
-                    }))
-                  }
-                  className="w-full accent-emerald-600"
-                />
-              </div>
-            </div>
-
             <label className="flex flex-col gap-2 text-xs uppercase tracking-[0.2em] text-inkSoft">
-              Notes (optional)
+              Meal
               <textarea
-                rows={2}
-                value={draft.notes}
-                onChange={(event) =>
-                  setDraft((prev) => ({ ...prev, notes: event.target.value }))
-                }
-                placeholder="Hunger level, cravings, anything worth noting..."
-                className="rounded-xl border border-line bg-white px-3 py-2 text-sm text-ink"
+                rows={5}
+                value={draft.mealText}
+                onChange={(event) => handleMealChange(event.target.value)}
+                placeholder="Type what you ate in plain English..."
+                required
+                className="min-h-[140px] rounded-2xl border border-line bg-white px-4 py-3 text-base text-ink"
               />
             </label>
+            <p className="text-xs text-inkSoft">
+              We&apos;ll estimate the whole foods % for you.
+            </p>
 
             {estimate ? (
               <div className="rounded-xl border border-line bg-white px-3 py-3 text-sm text-ink">
                 <p className="text-xs uppercase tracking-[0.2em] text-inkSoft">LLM Estimate</p>
+                <p className="mt-1 text-lg font-semibold text-ink">
+                  {draft.wholeFoodsPercent}% whole foods
+                </p>
                 <p className="mt-2 text-sm text-ink">{estimate.reason}</p>
                 <div className="mt-2 grid gap-2 text-xs text-inkSoft sm:grid-cols-2">
                   <div>
@@ -565,122 +423,30 @@ export default function Home() {
                   key={entry.id}
                   className="rounded-xl border border-line bg-white px-3 py-3"
                 >
-                  {editingId === entry.id && editDraft ? (
-                    <div className="space-y-3">
-                      <input
-                        type="text"
-                        value={editDraft.mealText}
-                        onChange={(event) =>
-                          setEditDraft({
-                            ...editDraft,
-                            mealText: event.target.value,
-                          })
-                        }
-                        className="w-full rounded-xl border border-line px-3 py-2 text-sm text-ink"
-                      />
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <input
-                          type="time"
-                          value={editDraft.time}
-                          onChange={(event) =>
-                            setEditDraft({ ...editDraft, time: event.target.value })
-                          }
-                          className="rounded-xl border border-line px-3 py-2 text-sm text-ink"
-                        />
-                        <select
-                          value={editDraft.mood}
-                          onChange={(event) =>
-                            setEditDraft({ ...editDraft, mood: event.target.value })
-                          }
-                          className="rounded-xl border border-line px-3 py-2 text-sm text-ink"
-                        >
-                          {MOODS.map((mood) => (
-                            <option key={mood} value={mood}>
-                              {mood}
-                            </option>
-                          ))}
-                        </select>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-ink">
+                          {entry.mealText}
+                        </p>
+                        <p className="text-xs text-inkSoft">
+                          {formatDisplayTime(entry.timestamp)}
+                        </p>
                       </div>
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-xs uppercase tracking-[0.2em] text-inkSoft">
-                          <span>Whole foods %</span>
-                          <span className="text-sm font-semibold text-accentDeep">
-                            {editDraft.wholeFoodsPercent}%
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0"
-                          max="100"
-                          step="5"
-                          value={editDraft.wholeFoodsPercent}
-                          onChange={(event) =>
-                            setEditDraft({
-                              ...editDraft,
-                              wholeFoodsPercent: Number(event.target.value),
-                            })
-                          }
-                          className="w-full accent-emerald-600"
-                        />
-                      </div>
-                      <textarea
-                        rows={2}
-                        value={editDraft.notes}
-                        onChange={(event) =>
-                          setEditDraft({ ...editDraft, notes: event.target.value })
-                        }
-                        className="w-full rounded-xl border border-line px-3 py-2 text-sm text-ink"
-                      />
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={saveEdit}
-                          className="rounded-full bg-emerald-600 px-3 py-2 text-xs font-semibold text-white"
-                        >
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          onClick={cancelEdit}
-                          className="rounded-full border border-line px-3 py-2 text-xs uppercase tracking-[0.2em] text-inkSoft"
-                        >
-                          Cancel
-                        </button>
-                      </div>
+                      <span className="text-sm font-semibold text-accentDeep">
+                        {entry.wholeFoodsPercent}%
+                      </span>
                     </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-semibold text-ink">
-                            {entry.mealText}
-                          </p>
-                          <p className="text-xs text-inkSoft">
-                            {formatDisplayTime(entry.timestamp)} · {entry.mood}
-                          </p>
-                        </div>
-                        <span className="text-sm font-semibold text-accentDeep">
-                          {entry.wholeFoodsPercent}%
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => startEdit(entry)}
-                          className="rounded-full border border-line px-3 py-1 text-xs uppercase tracking-[0.2em] text-inkSoft"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => deleteEntry(entry.id)}
-                          className="rounded-full border border-line px-3 py-1 text-xs uppercase tracking-[0.2em] text-inkSoft"
-                        >
-                          Delete
-                        </button>
-                      </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => deleteEntry(entry.id)}
+                        className="rounded-full border border-line px-3 py-1 text-xs uppercase tracking-[0.2em] text-inkSoft"
+                      >
+                        Delete
+                      </button>
                     </div>
-                  )}
+                  </div>
                 </div>
               ))
             )}
@@ -688,7 +454,7 @@ export default function Home() {
         </section>
 
         <footer className="pb-6 text-center text-[10px] uppercase tracking-[0.35em] text-inkSoft/70">
-          v4
+          v5
         </footer>
       </main>
     </div>
