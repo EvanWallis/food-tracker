@@ -3,7 +3,17 @@ import { GoogleGenAI } from "@google/genai";
 
 export const runtime = "nodejs";
 
-const MODEL = "gemini-pro";
+const MODEL_CANDIDATES = [
+  "gemini-2.0-flash-001",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash-002",
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
+  "gemini-1.0-pro",
+  "gemini-pro",
+  "text-bison-001",
+  "chat-bison-001",
+];
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
@@ -45,17 +55,36 @@ Meal: "${mealText}"
   });
 
   try {
-    const response = await ai.models.generateContent({
-      model: MODEL,
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-    });
+    let responseText = "";
+    let lastError: unknown = null;
 
-    const text = response.text ?? "";
+    for (const model of MODEL_CANDIDATES) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+        });
+        responseText = response.text ?? "";
+        break;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes("404") || message.includes("NOT_FOUND")) {
+          lastError = err;
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    if (!responseText) {
+      throw lastError ?? new Error("No available Gemini model for this API key.");
+    }
+
     const parsed = (() => {
       try {
-        return JSON.parse(text);
+        return JSON.parse(responseText);
       } catch {
-        const match = text.match(/\{[\s\S]*\}/);
+        const match = responseText.match(/\{[\s\S]*\}/);
         if (!match) return {};
         return JSON.parse(match[0]);
       }
