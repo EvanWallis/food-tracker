@@ -1,7 +1,8 @@
 {
   "name": "Food Tracker",
   "short_name": "Food Tracker",
-  "start_url": "/",
+  "start_url": "/?v=4",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#f8fafc",
   "theme_color": "#0f172a",

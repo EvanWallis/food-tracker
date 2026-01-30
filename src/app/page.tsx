@@ -683,7 +683,7 @@ export default function Home() {
         </section>
 
         <footer className="pb-6 text-center text-[10px] uppercase tracking-[0.35em] text-inkSoft/70">
-          v3
+          v4
         </footer>
       </main>
     </div>
