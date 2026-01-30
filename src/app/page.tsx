@@ -92,13 +92,19 @@ export default function Home() {
     void loadData();
   }, []);
 
+  const [selectedDate, setSelectedDate] = useState(() => new Date());
   const todayKey = getDayKey(new Date());
-  const todayEntries = useMemo(
-    () => entries.filter((entry) => getDayKey(entry.timestamp) === todayKey),
-    [entries, todayKey],
+  const selectedKey = getDayKey(selectedDate);
+  const isToday = selectedKey === todayKey;
+  const selectedEntries = useMemo(
+    () => entries.filter((entry) => getDayKey(entry.timestamp) === selectedKey),
+    [entries, selectedKey],
   );
 
-  const todayAverage = useMemo(() => weightedAverage(todayEntries), [todayEntries]);
+  const selectedAverage = useMemo(
+    () => weightedAverage(selectedEntries),
+    [selectedEntries],
+  );
   const allTimeAverage = useMemo(() => weightedAverage(entries), [entries]);
 
   const streak = useMemo(() => {
@@ -252,6 +258,20 @@ export default function Home() {
     }
   };
 
+  const shiftSelectedDate = (days: number) => {
+    setSelectedDate((prev) => {
+      const next = new Date(prev);
+      next.setDate(next.getDate() + days);
+      return next;
+    });
+  };
+
+  const selectedDateLabel = selectedDate.toLocaleDateString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-cream via-white to-white px-4 py-6">
       <main className="mx-auto flex w-full max-w-xl flex-col gap-6">
@@ -267,7 +287,9 @@ export default function Home() {
               <p className="text-[10px] uppercase tracking-[0.25em] text-inkSoft/70">
                 Entries
               </p>
-              <p className="mt-1 text-xl font-semibold text-ink">{todayEntries.length}</p>
+              <p className="mt-1 text-xl font-semibold text-ink">
+                {selectedEntries.length}
+              </p>
             </div>
             <div className="rounded-lg border border-line/70 bg-white/80 px-2 py-2">
               <p className="text-[10px] uppercase tracking-[0.25em] text-inkSoft/70">
@@ -278,7 +300,7 @@ export default function Home() {
             <div className="rounded-lg border border-line/70 bg-white/80 px-2 py-2">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-[10px] uppercase tracking-[0.25em] text-inkSoft/70">
-                  Today %
+                  Day %
                 </p>
                 <div className="flex items-center gap-1 text-[10px] text-inkSoft/70">
                   <span>Goal</span>
@@ -296,11 +318,13 @@ export default function Home() {
                   <span>%</span>
                 </div>
               </div>
-              <p className="mt-1 text-xl font-semibold text-ink">{todayAverage}%</p>
+              <p className="mt-1 text-xl font-semibold text-ink">
+                {selectedAverage}%
+              </p>
               <div className="mt-1 h-1.5 w-full rounded-full bg-line/40">
                 <div
                   className="h-1.5 rounded-full bg-gradient-to-r from-accent to-teal-400"
-                  style={{ width: `${Math.min(todayAverage, 100)}%` }}
+                  style={{ width: `${Math.min(selectedAverage, 100)}%` }}
                 />
               </div>
             </div>
@@ -407,18 +431,48 @@ export default function Home() {
         </section>
 
         <section className="rounded-2xl border border-line bg-white/90 p-4 shadow-soft">
-          <div className="flex items-center justify-between">
-            <h2 className="font-display text-2xl text-ink">Today&apos;s Entries</h2>
-            <span className="text-xs uppercase tracking-[0.25em] text-inkSoft">
-              {todayEntries.length} total
-            </span>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="font-display text-2xl text-ink">Entries</h2>
+              <p className="text-xs text-inkSoft">
+                {selectedDateLabel}
+                {isToday ? " · Today" : ""}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => shiftSelectedDate(-1)}
+                className="rounded-full border border-line px-3 py-1 text-xs uppercase tracking-[0.2em] text-inkSoft"
+              >
+                Prev
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedDate(new Date())}
+                className="rounded-full border border-line px-3 py-1 text-xs uppercase tracking-[0.2em] text-inkSoft"
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                onClick={() => shiftSelectedDate(1)}
+                disabled={isToday}
+                className={clsx(
+                  "rounded-full border border-line px-3 py-1 text-xs uppercase tracking-[0.2em] text-inkSoft",
+                  isToday && "cursor-not-allowed opacity-50",
+                )}
+              >
+                Next
+              </button>
+            </div>
           </div>
 
           <div className="mt-4 space-y-3">
-            {todayEntries.length === 0 ? (
+            {selectedEntries.length === 0 ? (
               <p className="text-sm text-inkSoft">No entries yet.</p>
             ) : (
-              todayEntries.map((entry) => (
+              selectedEntries.map((entry) => (
                 <div
                   key={entry.id}
                   className="rounded-xl border border-line bg-white px-3 py-3"
@@ -454,7 +508,7 @@ export default function Home() {
         </section>
 
         <footer className="pb-6 text-center text-[10px] uppercase tracking-[0.35em] text-inkSoft/70">
-          v5
+          v6
         </footer>
       </main>
     </div>
