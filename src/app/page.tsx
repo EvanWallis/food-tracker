@@ -37,6 +37,12 @@ const formatDisplayTime = (value: string) => {
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 };
 
+const getStatusColor = (value: number, goal: number) => {
+  if (value >= goal) return "bg-emerald-500";
+  if (value >= goal - 10) return "bg-amber-400";
+  return "bg-rose-500";
+};
+
 const getDayKey = (value: Date | string) => {
   const date = typeof value === "string" ? new Date(value) : value;
   const year = date.getFullYear();
@@ -278,7 +284,6 @@ export default function Home() {
         <header className="space-y-2">
           <p className="text-xs uppercase tracking-[0.35em] text-inkSoft">Daily Log</p>
           <h1 className="font-display text-4xl text-ink">Food Tracker</h1>
-          <p className="text-sm text-inkSoft">Log meals. Hit 80% whole foods.</p>
         </header>
 
         <section className="rounded-xl border border-line bg-white/70 px-3 py-3">
@@ -323,7 +328,10 @@ export default function Home() {
               </p>
               <div className="mt-1 h-1.5 w-full rounded-full bg-line/40">
                 <div
-                  className="h-1.5 rounded-full bg-gradient-to-r from-accent to-teal-400"
+                  className={clsx(
+                    "h-1.5 rounded-full transition-colors",
+                    getStatusColor(selectedAverage, goalPercent),
+                  )}
                   style={{ width: `${Math.min(selectedAverage, 100)}%` }}
                 />
               </div>
@@ -335,7 +343,10 @@ export default function Home() {
               <p className="mt-1 text-xl font-semibold text-ink">{allTimeAverage}%</p>
               <div className="mt-1 h-1.5 w-full rounded-full bg-line/40">
                 <div
-                  className="h-1.5 rounded-full bg-gradient-to-r from-teal-500 to-emerald-400"
+                  className={clsx(
+                    "h-1.5 rounded-full transition-colors",
+                    getStatusColor(allTimeAverage, goalPercent),
+                  )}
                   style={{ width: `${Math.min(allTimeAverage, 100)}%` }}
                 />
               </div>
@@ -508,7 +519,7 @@ export default function Home() {
         </section>
 
         <footer className="pb-6 text-center text-[10px] uppercase tracking-[0.35em] text-inkSoft/70">
-          v6
+          v7
         </footer>
       </main>
     </div>
