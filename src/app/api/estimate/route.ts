@@ -3,7 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 
 export const runtime = "nodejs";
 
-const MODEL = "gemini-1.5-flash";
+const MODEL = "gemini-pro";
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
@@ -41,7 +41,7 @@ Meal: "${mealText}"
 
   const ai = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY,
-    apiVersion: "v1",
+    apiVersion: "v1beta",
   });
 
   try {
