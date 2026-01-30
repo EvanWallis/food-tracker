@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, SchemaType } from "@google/genai";
 
 const MODEL = "gemini-2.0-flash";
 
@@ -46,14 +46,20 @@ Meal: "${mealText}"
       config: {
         responseMimeType: "application/json",
         responseSchema: {
-          type: "object",
+          type: SchemaType.OBJECT,
           properties: {
-            percent: { type: "number" },
-            reason: { type: "string" },
-            whole_foods_items: { type: "array", items: { type: "string" } },
-            non_whole_foods_items: { type: "array", items: { type: "string" } },
-            size_label: { type: "string" },
-            size_weight: { type: "number" },
+            percent: { type: SchemaType.NUMBER },
+            reason: { type: SchemaType.STRING },
+            whole_foods_items: {
+              type: SchemaType.ARRAY,
+              items: { type: SchemaType.STRING },
+            },
+            non_whole_foods_items: {
+              type: SchemaType.ARRAY,
+              items: { type: SchemaType.STRING },
+            },
+            size_label: { type: SchemaType.STRING },
+            size_weight: { type: SchemaType.NUMBER },
           },
           required: [
             "percent",
