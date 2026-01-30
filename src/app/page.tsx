@@ -681,6 +681,10 @@ export default function Home() {
             )}
           </div>
         </section>
+
+        <footer className="pb-6 text-center text-[10px] uppercase tracking-[0.35em] text-inkSoft/70">
+          v3
+        </footer>
       </main>
     </div>
   );
