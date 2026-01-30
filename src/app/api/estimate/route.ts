@@ -39,7 +39,10 @@ percent (0-100 integer), reason (one sentence), whole_foods_items (array), non_w
 Meal: "${mealText}"
 `;
 
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const ai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY,
+    apiVersion: "v1",
+  });
 
   try {
     const responseSchema = {
