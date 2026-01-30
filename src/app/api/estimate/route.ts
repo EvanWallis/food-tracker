@@ -45,37 +45,21 @@ Meal: "${mealText}"
   });
 
   try {
-    const responseSchema = {
-      type: "object",
-      properties: {
-        percent: { type: "number" },
-        reason: { type: "string" },
-        whole_foods_items: { type: "array", items: { type: "string" } },
-        non_whole_foods_items: { type: "array", items: { type: "string" } },
-        size_label: { type: "string" },
-        size_weight: { type: "number" },
-      },
-      required: [
-        "percent",
-        "reason",
-        "whole_foods_items",
-        "non_whole_foods_items",
-        "size_label",
-        "size_weight",
-      ],
-    } as const;
-
     const response = await ai.models.generateContent({
       model: MODEL,
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: responseSchema as unknown as Record<string, unknown>,
-      },
     });
 
-    const text = response.text;
-    const parsed = JSON.parse(text ?? "{}");
+    const text = response.text ?? "";
+    const parsed = (() => {
+      try {
+        return JSON.parse(text);
+      } catch {
+        const match = text.match(/\{[\s\S]*\}/);
+        if (!match) return {};
+        return JSON.parse(match[0]);
+      }
+    })();
 
     const percent = clamp(Number(parsed.percent) || 0, 0, 100);
     const sizeWeight = clamp(Number(parsed.size_weight) || 1, 0.5, 2);
