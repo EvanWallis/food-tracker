@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 
-const MODEL = "gemini-2.0-flash";
+export const runtime = "nodejs";
+
+const MODEL = "gemini-1.5-flash";
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
@@ -89,8 +91,10 @@ Meal: "${mealText}"
       size_weight: sizeWeight,
     });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("Gemini estimate failed:", message);
     return NextResponse.json(
-      { error: "Failed to estimate whole foods percent." },
+      { error: message || "Failed to estimate whole foods percent." },
       { status: 500 },
     );
   }

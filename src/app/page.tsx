@@ -196,7 +196,12 @@ export default function Home() {
     setIsEstimating(false);
 
     if (!response.ok) {
-      setError("Could not estimate whole foods. Try again.");
+      const payload = await response.json().catch(() => ({}));
+      const message =
+        typeof payload.error === "string"
+          ? payload.error
+          : "Could not estimate whole foods. Try again.";
+      setError(message);
       return;
     }
 
