@@ -89,6 +89,20 @@ type Draft = {
   meta: EntryMetaV2 | null;
 };
 
+type WeeklyMacros = {
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  fiber_g: number;
+};
+
+type GroceryPlan = {
+  summary: string;
+  items: string[];
+  weekly_macros: WeeklyMacros;
+  source: "gemini" | "fallback";
+};
+
 type NumericProfileField = "age" | "heightFt" | "heightIn" | "weightLbs" | "avgSteps";
 type ProfileInputs = Record<NumericProfileField, string>;
 type TargetInputs = Record<keyof NutrientTotals, string>;
@@ -299,6 +313,9 @@ const toNumber = (value: unknown, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
+
+const toRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 
 const lbsToKg = (lbs: number) => lbs * 0.45359237;
 const kgToLbs = (kg: number) => kg * 2.20462262;
@@ -584,6 +601,9 @@ export default function Home() {
   const [readyToSave, setReadyToSave] = useState(false);
   const [isEstimating, setIsEstimating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [groceryPlan, setGroceryPlan] = useState<GroceryPlan | null>(null);
+  const [isGeneratingGrocery, setIsGeneratingGrocery] = useState(false);
+  const [groceryError, setGroceryError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(() => new Date());
 
   const loadData = async () => {
@@ -871,6 +891,64 @@ export default function Home() {
       },
     }));
     setReadyToSave(true);
+  };
+
+  const runGroceryPlan = async () => {
+    setGroceryError(null);
+    const committedProfile = commitProfileInputs();
+    const committedTargets = commitTargetInputs();
+
+    setIsGeneratingGrocery(true);
+    const response = await fetch("/api/grocery", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        profile: {
+          age: committedProfile.age,
+          sex: committedProfile.sex,
+          height_ft: committedProfile.heightFt,
+          height_in: committedProfile.heightIn,
+          weight_lbs: committedProfile.weightLbs,
+          average_steps_day: committedProfile.avgSteps,
+        },
+        targets: committedTargets,
+      }),
+    });
+    setIsGeneratingGrocery(false);
+
+    const payload = toRecord(await response.json().catch(() => ({})));
+    if (!response.ok) {
+      const message =
+        typeof payload.error === "string"
+          ? payload.error
+          : "Could not generate a grocery list right now.";
+      setGroceryError(message);
+      return;
+    }
+
+    const weeklyDefaults = {
+      protein_g: committedTargets.protein_g * 7,
+      carbs_g: committedTargets.carbs_g * 7,
+      fat_g: committedTargets.fat_g * 7,
+      fiber_g: committedTargets.fiber_g * 7,
+    };
+    const weeklyRaw = toRecord(payload.weekly_macros);
+    const items = normalizeStringList(payload.items, 14);
+
+    setGroceryPlan({
+      summary:
+        typeof payload.summary === "string"
+          ? payload.summary.trim()
+          : "Simple weekly staples to support your macro targets.",
+      items: items.length ? items : ["No list items returned."],
+      weekly_macros: {
+        protein_g: clamp(Math.round(toNumber(weeklyRaw.protein_g, weeklyDefaults.protein_g)), 0, 5000),
+        carbs_g: clamp(Math.round(toNumber(weeklyRaw.carbs_g, weeklyDefaults.carbs_g)), 0, 7000),
+        fat_g: clamp(Math.round(toNumber(weeklyRaw.fat_g, weeklyDefaults.fat_g)), 0, 3000),
+        fiber_g: clamp(Math.round(toNumber(weeklyRaw.fiber_g, weeklyDefaults.fiber_g)), 0, 1500),
+      },
+      source: payload.source === "fallback" ? "fallback" : "gemini",
+    });
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -1231,6 +1309,56 @@ export default function Home() {
               </p>
             </div>
           </div>
+        </section>
+
+        <section className="rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.1)]">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-display text-2xl text-slate-900">Weekly Grocery List</h2>
+              <p className="text-xs text-slate-500">
+                One tap list based on your current daily targets.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={runGroceryPlan}
+              disabled={isGeneratingGrocery}
+              className={clsx(
+                "rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] text-white transition",
+                isGeneratingGrocery
+                  ? "cursor-not-allowed bg-slate-400"
+                  : "bg-slate-900 hover:bg-slate-800",
+              )}
+            >
+              {isGeneratingGrocery ? "Building..." : "Suggest grocery list"}
+            </button>
+          </div>
+
+          {groceryError ? <p className="mt-3 text-sm text-rose-600">{groceryError}</p> : null}
+
+          {groceryPlan ? (
+            <div className="mt-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 px-4 py-3">
+              <p className="text-sm text-slate-900">{groceryPlan.summary}</p>
+              <p className="mt-1 text-xs text-slate-500">
+                Weekly macro target: {Math.round(groceryPlan.weekly_macros.protein_g)}g protein
+                · {Math.round(groceryPlan.weekly_macros.carbs_g)}g carbs ·{" "}
+                {Math.round(groceryPlan.weekly_macros.fat_g)}g fat ·{" "}
+                {Math.round(groceryPlan.weekly_macros.fiber_g)}g fiber
+              </p>
+              {groceryPlan.source === "fallback" ? (
+                <p className="mt-1 text-xs text-slate-500">
+                  Using backup list format for this request.
+                </p>
+              ) : null}
+              <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-800">
+                {groceryPlan.items.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-slate-500">No list yet. Tap the button above.</p>
+          )}
         </section>
 
         <section className="rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-[0_22px_50px_rgba(15,23,42,0.1)]">
