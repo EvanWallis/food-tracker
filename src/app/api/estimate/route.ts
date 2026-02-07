@@ -261,6 +261,8 @@ Important:
 - For recommendation, default to SIMPLE and LOW COOK TIME meals.
 - Prefer fast options: minimal ingredients, short prep, microwave/assembly/no-cook if possible.
 - Treat saturated_fat_g, added_sugar_g, sodium_mg, and cholesterol_mg as upper-limit nutrients (lower is usually better).
+- Do NOT assume pantry ingredients. Avoid over-specific single recipes.
+- Give flexible meal templates with swap-friendly phrasing (e.g., "any lean protein", "any fruit", "frozen or fresh").
 
 Return STRICT JSON only with this exact shape:
 {
@@ -295,7 +297,12 @@ Return STRICT JSON only with this exact shape:
     "vitamin_e_mg": number,
     "vitamin_k_mcg": number
   },
-  "recommendation": "specific next meal suggestion for this user today",
+  "recommendation": "1 sentence focus for next meal based on today's gaps/excess",
+  "recommendation_options": [
+    "option 1 - flexible, low-cook, swap-friendly",
+    "option 2 - flexible, low-cook, swap-friendly",
+    "option 3 - flexible, low-cook, swap-friendly"
+  ],
   "size_label": "small | medium | large | very large",
   "size_weight": number,
   "confidence": "low | medium | high"
@@ -359,6 +366,7 @@ ${JSON.stringify(
     const improve = normalizeStringList(parsed.improve, 3);
     const recommendation =
       typeof parsed.recommendation === "string" ? parsed.recommendation.trim() : "";
+    const recommendationOptions = normalizeStringList(parsed.recommendation_options, 3);
     const sizeLabel = normalizeSizeLabel(parsed.size_label);
     const sizeWeight = clamp(
       toNumber(parsed.size_weight, sizeWeightDefault[sizeLabel]),
@@ -374,6 +382,7 @@ ${JSON.stringify(
       improve,
       nutrients,
       recommendation,
+      recommendation_options: recommendationOptions,
       size_label: sizeLabel,
       size_weight: sizeWeight,
       confidence,

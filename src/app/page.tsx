@@ -62,6 +62,7 @@ type EntryMetaV2 = {
   positive: string[];
   improve: string[];
   recommendation: string;
+  recommendation_options: string[];
   confidence: ConfidenceLevel;
 };
 
@@ -72,6 +73,7 @@ type Estimate = {
   improve: string[];
   nutrients: NutrientTotals;
   recommendation: string;
+  recommendation_options: string[];
   size_label: string;
   size_weight: number;
   confidence: ConfidenceLevel;
@@ -453,6 +455,7 @@ const parseEntryMeta = (notes: string | null): EntryMetaV2 | null => {
       improve,
       recommendation:
         typeof parsed.recommendation === "string" ? parsed.recommendation.trim() : "",
+      recommendation_options: normalizeStringList(parsed.recommendation_options, 4),
       confidence,
     };
   } catch {
@@ -484,6 +487,7 @@ const normalizeEstimate = (value: unknown): Estimate => {
     ),
     recommendation:
       typeof record.recommendation === "string" ? record.recommendation.trim() : "",
+    recommendation_options: normalizeStringList(record.recommendation_options, 4),
     size_label: typeof record.size_label === "string" ? record.size_label : "medium",
     size_weight: clamp(toNumber(record.size_weight, 1), 0.5, 2),
     confidence,
@@ -862,6 +866,7 @@ export default function Home() {
         positive: normalized.positive,
         improve: normalized.improve,
         recommendation: normalized.recommendation,
+        recommendation_options: normalized.recommendation_options,
         confidence: normalized.confidence,
       },
     }));
@@ -887,6 +892,7 @@ export default function Home() {
       positive: draft.meta?.positive ?? [],
       improve: draft.meta?.improve ?? [],
       recommendation: draft.meta?.recommendation ?? "",
+      recommendation_options: draft.meta?.recommendation_options ?? [],
       confidence: draft.meta?.confidence ?? "medium",
     };
 
@@ -1319,6 +1325,15 @@ export default function Home() {
                   <p className="mt-1 text-sm text-slate-900">
                     {estimate.recommendation || "No recommendation returned."}
                   </p>
+                  {estimate.recommendation_options.length ? (
+                    <div className="mt-2 space-y-1">
+                      {estimate.recommendation_options.map((option, index) => (
+                        <p key={option} className="text-xs text-slate-700">
+                          {index + 1}. {option}
+                        </p>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
@@ -1557,9 +1572,14 @@ export default function Home() {
                       ) : null}
                     </div>
                     {meta?.recommendation ? (
-                      <p className="rounded-xl border border-emerald-200/80 bg-emerald-50/60 px-2 py-2 text-xs text-slate-800">
-                        Next meal: {meta.recommendation}
-                      </p>
+                      <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/60 px-2 py-2 text-xs text-slate-800">
+                        <p>Next meal: {meta.recommendation}</p>
+                        {meta.recommendation_options.length ? (
+                          <p className="mt-1 text-slate-700">
+                            Flexible option: {meta.recommendation_options[0]}
+                          </p>
+                        ) : null}
+                      </div>
                     ) : null}
                     <div className="flex flex-wrap gap-2">
                       <button
