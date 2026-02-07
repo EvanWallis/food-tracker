@@ -32,12 +32,27 @@ type NutrientTotals = {
   carbs_g: number;
   fat_g: number;
   fiber_g: number;
+  saturated_fat_g: number;
+  added_sugar_g: number;
+  omega3_g: number;
   sodium_mg: number;
+  cholesterol_mg: number;
   potassium_mg: number;
   magnesium_mg: number;
   calcium_mg: number;
   iron_mg: number;
+  zinc_mg: number;
+  choline_mg: number;
   vitamin_c_mg: number;
+  vitamin_d_mcg: number;
+  vitamin_b12_mcg: number;
+  vitamin_b6_mg: number;
+  folate_mcg: number;
+  iodine_mcg: number;
+  selenium_mcg: number;
+  vitamin_a_mcg_rae: number;
+  vitamin_e_mg: number;
+  vitamin_k_mcg: number;
 };
 
 type EntryMetaV2 = {
@@ -84,25 +99,103 @@ const NUTRIENT_KEYS: Array<keyof NutrientTotals> = [
   "carbs_g",
   "fat_g",
   "fiber_g",
+  "saturated_fat_g",
+  "added_sugar_g",
+  "omega3_g",
   "sodium_mg",
+  "cholesterol_mg",
   "potassium_mg",
   "magnesium_mg",
   "calcium_mg",
   "iron_mg",
+  "zinc_mg",
+  "choline_mg",
   "vitamin_c_mg",
+  "vitamin_d_mcg",
+  "vitamin_b12_mcg",
+  "vitamin_b6_mg",
+  "folate_mcg",
+  "iodine_mcg",
+  "selenium_mcg",
+  "vitamin_a_mcg_rae",
+  "vitamin_e_mg",
+  "vitamin_k_mcg",
 ];
+
+const PRIMARY_NUTRIENT_KEYS: Array<keyof NutrientTotals> = [
+  "protein_g",
+  "carbs_g",
+  "fat_g",
+  "fiber_g",
+  "saturated_fat_g",
+  "added_sugar_g",
+  "omega3_g",
+  "sodium_mg",
+  "cholesterol_mg",
+];
+
+const MICRONUTRIENT_KEYS: Array<keyof NutrientTotals> = [
+  "potassium_mg",
+  "magnesium_mg",
+  "calcium_mg",
+  "iron_mg",
+  "zinc_mg",
+  "choline_mg",
+  "vitamin_c_mg",
+  "vitamin_d_mcg",
+  "vitamin_b12_mcg",
+  "vitamin_b6_mg",
+  "folate_mcg",
+  "iodine_mcg",
+  "selenium_mcg",
+  "vitamin_a_mcg_rae",
+  "vitamin_e_mg",
+  "vitamin_k_mcg",
+];
+
+const ESTIMATE_HIGHLIGHT_KEYS: Array<keyof NutrientTotals> = [
+  "protein_g",
+  "carbs_g",
+  "fat_g",
+  "fiber_g",
+  "saturated_fat_g",
+  "added_sugar_g",
+  "omega3_g",
+];
+
+const UPPER_BOUND_KEYS = new Set<keyof NutrientTotals>([
+  "saturated_fat_g",
+  "added_sugar_g",
+  "sodium_mg",
+  "cholesterol_mg",
+]);
 
 const NUTRIENT_LABELS: Record<keyof NutrientTotals, string> = {
   protein_g: "Protein",
   carbs_g: "Carbs",
   fat_g: "Fat",
   fiber_g: "Fiber",
+  saturated_fat_g: "Sat Fat",
+  added_sugar_g: "Added Sugar",
+  omega3_g: "Omega-3",
   sodium_mg: "Sodium",
+  cholesterol_mg: "Cholesterol",
   potassium_mg: "Potassium",
   magnesium_mg: "Magnesium",
   calcium_mg: "Calcium",
   iron_mg: "Iron",
+  zinc_mg: "Zinc",
+  choline_mg: "Choline",
   vitamin_c_mg: "Vitamin C",
+  vitamin_d_mcg: "Vitamin D",
+  vitamin_b12_mcg: "Vitamin B12",
+  vitamin_b6_mg: "Vitamin B6",
+  folate_mcg: "Folate",
+  iodine_mcg: "Iodine",
+  selenium_mcg: "Selenium",
+  vitamin_a_mcg_rae: "Vitamin A",
+  vitamin_e_mg: "Vitamin E",
+  vitamin_k_mcg: "Vitamin K",
 };
 
 const NUTRIENT_UNITS: Record<keyof NutrientTotals, string> = {
@@ -110,12 +203,27 @@ const NUTRIENT_UNITS: Record<keyof NutrientTotals, string> = {
   carbs_g: "g",
   fat_g: "g",
   fiber_g: "g",
+  saturated_fat_g: "g",
+  added_sugar_g: "g",
+  omega3_g: "g",
   sodium_mg: "mg",
+  cholesterol_mg: "mg",
   potassium_mg: "mg",
   magnesium_mg: "mg",
   calcium_mg: "mg",
   iron_mg: "mg",
+  zinc_mg: "mg",
+  choline_mg: "mg",
   vitamin_c_mg: "mg",
+  vitamin_d_mcg: "mcg",
+  vitamin_b12_mcg: "mcg",
+  vitamin_b6_mg: "mg",
+  folate_mcg: "mcg",
+  iodine_mcg: "mcg",
+  selenium_mcg: "mcg",
+  vitamin_a_mcg_rae: "mcg RAE",
+  vitamin_e_mg: "mg",
+  vitamin_k_mcg: "mcg",
 };
 
 const NUTRIENT_LIMITS: Record<keyof NutrientTotals, { min: number; max: number }> = {
@@ -123,12 +231,27 @@ const NUTRIENT_LIMITS: Record<keyof NutrientTotals, { min: number; max: number }
   carbs_g: { min: 0, max: 800 },
   fat_g: { min: 0, max: 300 },
   fiber_g: { min: 0, max: 120 },
+  saturated_fat_g: { min: 0, max: 120 },
+  added_sugar_g: { min: 0, max: 300 },
+  omega3_g: { min: 0, max: 20 },
   sodium_mg: { min: 0, max: 12000 },
+  cholesterol_mg: { min: 0, max: 1200 },
   potassium_mg: { min: 0, max: 10000 },
   magnesium_mg: { min: 0, max: 2000 },
   calcium_mg: { min: 0, max: 3000 },
   iron_mg: { min: 0, max: 100 },
+  zinc_mg: { min: 0, max: 80 },
+  choline_mg: { min: 0, max: 2000 },
   vitamin_c_mg: { min: 0, max: 2000 },
+  vitamin_d_mcg: { min: 0, max: 250 },
+  vitamin_b12_mcg: { min: 0, max: 200 },
+  vitamin_b6_mg: { min: 0, max: 50 },
+  folate_mcg: { min: 0, max: 2000 },
+  iodine_mcg: { min: 0, max: 2000 },
+  selenium_mcg: { min: 0, max: 1000 },
+  vitamin_a_mcg_rae: { min: 0, max: 4000 },
+  vitamin_e_mg: { min: 0, max: 1000 },
+  vitamin_k_mcg: { min: 0, max: 1500 },
 };
 
 const DEFAULT_PROFILE: NutritionProfile = {
@@ -201,12 +324,27 @@ const emptyNutrients = (): NutrientTotals => ({
   carbs_g: 0,
   fat_g: 0,
   fiber_g: 0,
+  saturated_fat_g: 0,
+  added_sugar_g: 0,
+  omega3_g: 0,
   sodium_mg: 0,
+  cholesterol_mg: 0,
   potassium_mg: 0,
   magnesium_mg: 0,
   calcium_mg: 0,
   iron_mg: 0,
+  zinc_mg: 0,
+  choline_mg: 0,
   vitamin_c_mg: 0,
+  vitamin_d_mcg: 0,
+  vitamin_b12_mcg: 0,
+  vitamin_b6_mg: 0,
+  folate_mcg: 0,
+  iodine_mcg: 0,
+  selenium_mcg: 0,
+  vitamin_a_mcg_rae: 0,
+  vitamin_e_mg: 0,
+  vitamin_k_mcg: 0,
 });
 
 const sanitizeNutrients = (
@@ -218,6 +356,20 @@ const sanitizeNutrients = (
     base[key] = clamp(toNumber(value?.[key], 0), limits.min, limits.max);
   }
   return base;
+};
+
+const mergeTargetsWithDefaults = (
+  defaults: NutrientTotals,
+  value: Partial<Record<keyof NutrientTotals, unknown>> | null | undefined,
+): NutrientTotals => {
+  const merged = { ...defaults };
+  for (const key of NUTRIENT_KEYS) {
+    const parsed = Number(value?.[key]);
+    if (!Number.isFinite(parsed)) continue;
+    const limits = NUTRIENT_LIMITS[key];
+    merged[key] = clamp(parsed, limits.min, limits.max);
+  }
+  return merged;
 };
 
 const addNutrients = (a: NutrientTotals, b: NutrientTotals): NutrientTotals => {
@@ -238,18 +390,41 @@ const computeDefaultTargets = (profile: NutritionProfile): NutrientTotals => {
   const carbs = clamp(Math.round(weightKg * carbsMultiplier), 120, 420);
   const fiber = profile.sex === "male" ? 38 : profile.sex === "female" ? 28 : 33;
   const iron = profile.sex === "female" ? 18 : 11;
+  const zinc = profile.sex === "female" ? 8 : 11;
+  const magnesium = profile.sex === "female" ? 320 : profile.sex === "male" ? 420 : 370;
+  const vitaminC =
+    profile.sex === "female" ? 75 : profile.sex === "male" ? 90 : 82;
+  const omega3 = profile.sex === "female" ? 1.1 : profile.sex === "male" ? 1.6 : 1.3;
+  const choline = profile.sex === "female" ? 425 : profile.sex === "male" ? 550 : 500;
+  const vitaminA = profile.sex === "female" ? 700 : profile.sex === "male" ? 900 : 800;
+  const vitaminK = profile.sex === "female" ? 90 : profile.sex === "male" ? 120 : 105;
 
   return {
     protein_g: protein,
     carbs_g: carbs,
     fat_g: fat,
     fiber_g: fiber,
+    saturated_fat_g: 20,
+    added_sugar_g: 50,
+    omega3_g: omega3,
     sodium_mg: 2300,
+    cholesterol_mg: 300,
     potassium_mg: 3500,
-    magnesium_mg: 420,
+    magnesium_mg: magnesium,
     calcium_mg: 1000,
     iron_mg: iron,
-    vitamin_c_mg: 90,
+    zinc_mg: zinc,
+    choline_mg: choline,
+    vitamin_c_mg: vitaminC,
+    vitamin_d_mcg: 15,
+    vitamin_b12_mcg: 2.4,
+    vitamin_b6_mg: 1.7,
+    folate_mcg: 400,
+    iodine_mcg: 150,
+    selenium_mcg: 55,
+    vitamin_a_mcg_rae: vitaminA,
+    vitamin_e_mg: 15,
+    vitamin_k_mcg: vitaminK,
   };
 };
 
@@ -430,6 +605,7 @@ export default function Home() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
+      let resolvedProfile = DEFAULT_PROFILE;
       const profileRaw = window.localStorage.getItem(PROFILE_STORAGE_KEY);
       if (profileRaw) {
         const parsed = JSON.parse(profileRaw) as Record<string, unknown>;
@@ -440,7 +616,7 @@ export default function Home() {
         );
         const legacyFeetInches = cmToFeetInches(legacyHeightCm);
         const legacyWeightKg = clamp(toNumber(parsed.weightKg, lbsToKg(180)), 35, 250);
-        setProfile({
+        resolvedProfile = {
           age: clamp(Math.round(toNumber(parsed.age, DEFAULT_PROFILE.age)), 13, 100),
           heightFt: clamp(
             Math.round(toNumber(parsed.heightFt, legacyFeetInches.feet)),
@@ -468,15 +644,19 @@ export default function Home() {
             1000,
             40000,
           ),
-        });
+        };
       }
+      setProfile(resolvedProfile);
+      const defaultTargets = computeDefaultTargets(resolvedProfile);
 
       const targetsRaw = window.localStorage.getItem(TARGETS_STORAGE_KEY);
       if (targetsRaw) {
         const parsed = JSON.parse(targetsRaw) as Partial<
           Record<keyof NutrientTotals, unknown>
         >;
-        setTargets(sanitizeNutrients(parsed));
+        setTargets(mergeTargetsWithDefaults(defaultTargets, parsed));
+      } else {
+        setTargets(defaultTargets);
       }
     } catch {
       setProfile(DEFAULT_PROFILE);
@@ -785,6 +965,27 @@ export default function Home() {
     setTargets(computeDefaultTargets(committedProfile));
   };
 
+  const renderTargetInput = (key: keyof NutrientTotals) => (
+    <label key={key} className="flex flex-col gap-1 text-xs text-slate-500">
+      {NUTRIENT_LABELS[key]} ({NUTRIENT_UNITS[key]})
+      <input
+        type="number"
+        value={targetInputs[key]}
+        min={NUTRIENT_LIMITS[key].min}
+        max={NUTRIENT_LIMITS[key].max}
+        inputMode="decimal"
+        onChange={(event) =>
+          setTargetInputs((prev) => ({
+            ...prev,
+            [key]: event.target.value,
+          }))
+        }
+        onBlur={commitTargetInputs}
+        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+      />
+    </label>
+  );
+
   const profileTargetsSection = (
     <details className="group rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-[0_22px_55px_rgba(15,23,42,0.12)]">
       <summary className="cursor-pointer list-none">
@@ -922,27 +1123,26 @@ export default function Home() {
               Auto-fill
             </button>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
-            {NUTRIENT_KEYS.map((key) => (
-              <label key={key} className="flex flex-col gap-1 text-xs text-slate-500">
-                {NUTRIENT_LABELS[key]} ({NUTRIENT_UNITS[key]})
-                <input
-                  type="number"
-                  value={targetInputs[key]}
-                  min={NUTRIENT_LIMITS[key].min}
-                  max={NUTRIENT_LIMITS[key].max}
-                  inputMode="decimal"
-                  onChange={(event) =>
-                    setTargetInputs((prev) => ({
-                      ...prev,
-                      [key]: event.target.value,
-                    }))
-                  }
-                  onBlur={commitTargetInputs}
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
-                />
-              </label>
-            ))}
+          <p className="mt-3 text-[11px] uppercase tracking-[0.2em] text-slate-500">
+            Core & Macros
+          </p>
+          <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {PRIMARY_NUTRIENT_KEYS.map((key) => renderTargetInput(key))}
+          </div>
+
+          <details className="mt-4 rounded-xl border border-slate-200/80 bg-white px-3 py-2">
+            <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.2em] text-slate-500">
+              Micronutrient Targets
+            </summary>
+            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {MICRONUTRIENT_KEYS.map((key) => renderTargetInput(key))}
+            </div>
+          </details>
+
+          <div className="mt-3 rounded-xl border border-slate-200/80 bg-white px-3 py-2">
+            <p className="text-[11px] text-slate-500">
+              Upper-limit targets: Saturated fat, Added sugar, Sodium, Cholesterol.
+            </p>
           </div>
         </div>
       </div>
@@ -1122,7 +1322,7 @@ export default function Home() {
                 </div>
 
                 <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-                  {(["protein_g", "carbs_g", "fat_g", "fiber_g"] as const).map((key) => (
+                  {ESTIMATE_HIGHLIGHT_KEYS.map((key) => (
                     <div
                       key={key}
                       className="rounded-xl border border-slate-200/80 bg-white px-2 py-2"
@@ -1142,16 +1342,7 @@ export default function Home() {
                     Micronutrient estimate
                   </summary>
                   <div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
-                    {(
-                      [
-                        "sodium_mg",
-                        "potassium_mg",
-                        "magnesium_mg",
-                        "calcium_mg",
-                        "iron_mg",
-                        "vitamin_c_mg",
-                      ] as const
-                    ).map((key) => (
+                    {MICRONUTRIENT_KEYS.map((key) => (
                       <div
                         key={key}
                         className="rounded-xl border border-slate-200/80 bg-slate-50/70 px-2 py-2"
@@ -1220,18 +1411,8 @@ export default function Home() {
           </p>
 
           <div className="mt-4 grid gap-2">
-            {(
-              [
-                "protein_g",
-                "carbs_g",
-                "fat_g",
-                "fiber_g",
-                "potassium_mg",
-                "magnesium_mg",
-                "sodium_mg",
-              ] as const
-            ).map((key) => {
-              const isUpperBound = key === "sodium_mg";
+            {PRIMARY_NUTRIENT_KEYS.map((key) => {
+              const isUpperBound = UPPER_BOUND_KEYS.has(key);
               const actual = coverageTotals[key];
               const target = targets[key];
               const coverage = isUpperBound
@@ -1265,6 +1446,44 @@ export default function Home() {
               );
             })}
           </div>
+
+          <details className="mt-4 rounded-xl border border-slate-200/80 bg-slate-50/60 px-3 py-2">
+            <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.2em] text-slate-500">
+              Micronutrient Coverage
+            </summary>
+            <div className="mt-3 grid gap-2">
+              {MICRONUTRIENT_KEYS.map((key) => {
+                const actual = coverageTotals[key];
+                const target = targets[key];
+                const coverage = getCoveragePercent(actual, target);
+
+                return (
+                  <div
+                    key={key}
+                    className="rounded-xl border border-slate-200/80 bg-white px-3 py-2"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                        {NUTRIENT_LABELS[key]}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {Math.round(actual)} / {Math.round(target)} {NUTRIENT_UNITS[key]}
+                      </p>
+                    </div>
+                    <div className="mt-2 h-2.5 w-full rounded-full bg-slate-200/70">
+                      <div
+                        className={clsx(
+                          "h-2.5 rounded-full transition-colors",
+                          getTrafficColor(coverage),
+                        )}
+                        style={{ width: `${Math.min(coverage, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </details>
         </details>
 
         <section className="rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-[0_20px_48px_rgba(15,23,42,0.1)]">

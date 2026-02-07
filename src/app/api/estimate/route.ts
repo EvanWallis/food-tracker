@@ -8,12 +8,27 @@ type NutrientTotals = {
   carbs_g: number;
   fat_g: number;
   fiber_g: number;
+  saturated_fat_g: number;
+  added_sugar_g: number;
+  omega3_g: number;
   sodium_mg: number;
+  cholesterol_mg: number;
   potassium_mg: number;
   magnesium_mg: number;
   calcium_mg: number;
   iron_mg: number;
+  zinc_mg: number;
+  choline_mg: number;
   vitamin_c_mg: number;
+  vitamin_d_mcg: number;
+  vitamin_b12_mcg: number;
+  vitamin_b6_mg: number;
+  folate_mcg: number;
+  iodine_mcg: number;
+  selenium_mcg: number;
+  vitamin_a_mcg_rae: number;
+  vitamin_e_mg: number;
+  vitamin_k_mcg: number;
 };
 
 const MODEL_CANDIDATES = [
@@ -31,12 +46,27 @@ const NUTRIENT_KEYS: Array<keyof NutrientTotals> = [
   "carbs_g",
   "fat_g",
   "fiber_g",
+  "saturated_fat_g",
+  "added_sugar_g",
+  "omega3_g",
   "sodium_mg",
+  "cholesterol_mg",
   "potassium_mg",
   "magnesium_mg",
   "calcium_mg",
   "iron_mg",
+  "zinc_mg",
+  "choline_mg",
   "vitamin_c_mg",
+  "vitamin_d_mcg",
+  "vitamin_b12_mcg",
+  "vitamin_b6_mg",
+  "folate_mcg",
+  "iodine_mcg",
+  "selenium_mcg",
+  "vitamin_a_mcg_rae",
+  "vitamin_e_mg",
+  "vitamin_k_mcg",
 ];
 
 const NUTRIENT_LIMITS: Record<keyof NutrientTotals, { min: number; max: number }> = {
@@ -44,12 +74,27 @@ const NUTRIENT_LIMITS: Record<keyof NutrientTotals, { min: number; max: number }
   carbs_g: { min: 0, max: 800 },
   fat_g: { min: 0, max: 300 },
   fiber_g: { min: 0, max: 120 },
+  saturated_fat_g: { min: 0, max: 120 },
+  added_sugar_g: { min: 0, max: 300 },
+  omega3_g: { min: 0, max: 20 },
   sodium_mg: { min: 0, max: 12000 },
+  cholesterol_mg: { min: 0, max: 1200 },
   potassium_mg: { min: 0, max: 10000 },
   magnesium_mg: { min: 0, max: 2000 },
   calcium_mg: { min: 0, max: 3000 },
   iron_mg: { min: 0, max: 100 },
+  zinc_mg: { min: 0, max: 80 },
+  choline_mg: { min: 0, max: 2000 },
   vitamin_c_mg: { min: 0, max: 2000 },
+  vitamin_d_mcg: { min: 0, max: 250 },
+  vitamin_b12_mcg: { min: 0, max: 200 },
+  vitamin_b6_mg: { min: 0, max: 50 },
+  folate_mcg: { min: 0, max: 2000 },
+  iodine_mcg: { min: 0, max: 2000 },
+  selenium_mcg: { min: 0, max: 1000 },
+  vitamin_a_mcg_rae: { min: 0, max: 4000 },
+  vitamin_e_mg: { min: 0, max: 1000 },
+  vitamin_k_mcg: { min: 0, max: 1500 },
 };
 
 const clamp = (value: number, min: number, max: number) =>
@@ -215,6 +260,7 @@ Important:
 - Keep wording clear and actionable.
 - For recommendation, default to SIMPLE and LOW COOK TIME meals.
 - Prefer fast options: minimal ingredients, short prep, microwave/assembly/no-cook if possible.
+- Treat saturated_fat_g, added_sugar_g, sodium_mg, and cholesterol_mg as upper-limit nutrients (lower is usually better).
 
 Return STRICT JSON only with this exact shape:
 {
@@ -227,12 +273,27 @@ Return STRICT JSON only with this exact shape:
     "carbs_g": number,
     "fat_g": number,
     "fiber_g": number,
+    "saturated_fat_g": number,
+    "added_sugar_g": number,
+    "omega3_g": number,
     "sodium_mg": number,
+    "cholesterol_mg": number,
     "potassium_mg": number,
     "magnesium_mg": number,
     "calcium_mg": number,
     "iron_mg": number,
-    "vitamin_c_mg": number
+    "zinc_mg": number,
+    "choline_mg": number,
+    "vitamin_c_mg": number,
+    "vitamin_d_mcg": number,
+    "vitamin_b12_mcg": number,
+    "vitamin_b6_mg": number,
+    "folate_mcg": number,
+    "iodine_mcg": number,
+    "selenium_mcg": number,
+    "vitamin_a_mcg_rae": number,
+    "vitamin_e_mg": number,
+    "vitamin_k_mcg": number
   },
   "recommendation": "specific next meal suggestion for this user today",
   "size_label": "small | medium | large | very large",
