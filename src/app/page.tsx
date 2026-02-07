@@ -72,6 +72,10 @@ type Draft = {
   meta: EntryMetaV2 | null;
 };
 
+type NumericProfileField = "age" | "heightFt" | "heightIn" | "weightLbs" | "avgSteps";
+type ProfileInputs = Record<NumericProfileField, string>;
+type TargetInputs = Record<keyof NutrientTotals, string>;
+
 const PROFILE_STORAGE_KEY = "food-tracker-profile-v1";
 const TARGETS_STORAGE_KEY = "food-tracker-targets-v1";
 
@@ -136,20 +140,39 @@ const DEFAULT_PROFILE: NutritionProfile = {
   avgSteps: 8000,
 };
 
+const PROFILE_LIMITS: Record<NumericProfileField, { min: number; max: number }> = {
+  age: { min: 13, max: 100 },
+  heightFt: { min: 3, max: 8 },
+  heightIn: { min: 0, max: 11 },
+  weightLbs: { min: 80, max: 550 },
+  avgSteps: { min: 1000, max: 40000 },
+};
+
+const toInputString = (value: number) =>
+  Number.isFinite(value) ? String(Math.round(value * 10) / 10) : "";
+
+const profileToInputs = (profile: NutritionProfile): ProfileInputs => ({
+  age: toInputString(profile.age),
+  heightFt: toInputString(profile.heightFt),
+  heightIn: toInputString(profile.heightIn),
+  weightLbs: toInputString(profile.weightLbs),
+  avgSteps: toInputString(profile.avgSteps),
+});
+
+const targetsToInputs = (targets: NutrientTotals): TargetInputs => {
+  const next = {} as TargetInputs;
+  for (const key of NUTRIENT_KEYS) {
+    next[key] = toInputString(targets[key]);
+  }
+  return next;
+};
+
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 
 const toNumber = (value: unknown, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-};
-
-const parseWholeInput = (raw: string, previous: number, min: number, max: number) => {
-  const trimmed = raw.trim();
-  if (trimmed === "") return previous;
-  const parsed = Number(trimmed);
-  if (!Number.isFinite(parsed)) return previous;
-  return clamp(Math.round(parsed), min, max);
 };
 
 const lbsToKg = (lbs: number) => lbs * 0.45359237;
@@ -317,9 +340,9 @@ const weightedAverage = (entries: MealEntry[]) => {
   return weightSum ? Math.round(total / weightSum) : 0;
 };
 
-const getStatusColor = (value: number, goal: number) => {
-  if (value >= goal) return "bg-emerald-500";
-  if (value >= goal - 10) return "bg-amber-400";
+const getTrafficColor = (coverage: number) => {
+  if (coverage >= 100) return "bg-emerald-500";
+  if (coverage >= 75) return "bg-amber-400";
   return "bg-rose-500";
 };
 
@@ -351,8 +374,14 @@ export default function Home() {
   const [entries, setEntries] = useState<MealEntry[]>([]);
   const [optimalGoal, setOptimalGoal] = useState(80);
   const [profile, setProfile] = useState<NutritionProfile>(DEFAULT_PROFILE);
-  const [targets, setTargets] = useState<NutrientTotals>(
+  const [profileInputs, setProfileInputs] = useState<ProfileInputs>(() =>
+    profileToInputs(DEFAULT_PROFILE),
+  );
+  const [targets, setTargets] = useState<NutrientTotals>(() =>
     computeDefaultTargets(DEFAULT_PROFILE),
+  );
+  const [targetInputs, setTargetInputs] = useState<TargetInputs>(() =>
+    targetsToInputs(computeDefaultTargets(DEFAULT_PROFILE)),
   );
   const [prefsHydrated, setPrefsHydrated] = useState(false);
   const [draft, setDraft] = useState<Draft>({
@@ -450,6 +479,14 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    setProfileInputs(profileToInputs(profile));
+  }, [profile]);
+
+  useEffect(() => {
+    setTargetInputs(targetsToInputs(targets));
+  }, [targets]);
+
+  useEffect(() => {
     if (!prefsHydrated || typeof window === "undefined") return;
     window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
     window.localStorage.setItem(TARGETS_STORAGE_KEY, JSON.stringify(targets));
@@ -496,6 +533,16 @@ export default function Home() {
     return selectedTotals;
   }, [estimate, isToday, selectedTotals, todayTotals]);
 
+  const dayOptimalCoverage = useMemo(() => {
+    if (!optimalGoal) return 0;
+    return clamp(Math.round((selectedAverage / optimalGoal) * 100), 0, 160);
+  }, [optimalGoal, selectedAverage]);
+
+  const estimateCoverage = useMemo(() => {
+    if (!estimate || !optimalGoal) return 0;
+    return clamp(Math.round((estimate.optimal_score / optimalGoal) * 100), 0, 160);
+  }, [estimate, optimalGoal]);
+
   const selectedEntryRows = useMemo(
     () =>
       selectedEntries.map((entry) => ({
@@ -519,8 +566,47 @@ export default function Home() {
     setReadyToSave(false);
   };
 
+  const commitProfileInputs = () => {
+    const next: NutritionProfile = {
+      ...profile,
+      age: profile.age,
+      heightFt: profile.heightFt,
+      heightIn: profile.heightIn,
+      weightLbs: profile.weightLbs,
+      avgSteps: profile.avgSteps,
+    };
+
+    (Object.keys(PROFILE_LIMITS) as NumericProfileField[]).forEach((field) => {
+      const parsed = Number(profileInputs[field].trim());
+      if (!Number.isFinite(parsed)) return;
+      const limits = PROFILE_LIMITS[field];
+      next[field] = clamp(Math.round(parsed), limits.min, limits.max);
+    });
+
+    setProfile(next);
+    setProfileInputs(profileToInputs(next));
+    return next;
+  };
+
+  const commitTargetInputs = () => {
+    const next = { ...targets };
+
+    NUTRIENT_KEYS.forEach((key) => {
+      const parsed = Number(targetInputs[key].trim());
+      if (!Number.isFinite(parsed)) return;
+      const limits = NUTRIENT_LIMITS[key];
+      next[key] = clamp(parsed, limits.min, limits.max);
+    });
+
+    setTargets(next);
+    setTargetInputs(targetsToInputs(next));
+    return next;
+  };
+
   const runEstimate = async () => {
     setError(null);
+    const committedProfile = commitProfileInputs();
+    const committedTargets = commitTargetInputs();
     const mealText = draft.mealText.trim();
     if (!mealText) return;
 
@@ -538,14 +624,14 @@ export default function Home() {
       body: JSON.stringify({
         mealText,
         profile: {
-          age: profile.age,
-          sex: profile.sex,
-          height_ft: profile.heightFt,
-          height_in: profile.heightIn,
-          weight_lbs: profile.weightLbs,
-          average_steps_day: profile.avgSteps,
+          age: committedProfile.age,
+          sex: committedProfile.sex,
+          height_ft: committedProfile.heightFt,
+          height_in: committedProfile.heightIn,
+          weight_lbs: committedProfile.weightLbs,
+          average_steps_day: committedProfile.avgSteps,
         },
-        targets: { ...targets, optimal_goal: optimalGoal },
+        targets: { ...committedTargets, optimal_goal: optimalGoal },
         day_context: {
           date: todayKey,
           meal_count: todayEntries.length,
@@ -687,87 +773,98 @@ export default function Home() {
   };
 
   const recalcTargetsFromProfile = () => {
-    setTargets(computeDefaultTargets(profile));
+    const committedProfile = commitProfileInputs();
+    setTargets(computeDefaultTargets(committedProfile));
   };
 
   const profileTargetsSection = (
-    <details className="rounded-2xl border border-line bg-white/90 p-4 shadow-soft">
+    <details className="group rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-[0_22px_55px_rgba(15,23,42,0.12)]">
       <summary className="cursor-pointer list-none">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="font-display text-2xl text-ink">Profile & Targets</h2>
-          <span className="text-xs uppercase tracking-[0.2em] text-inkSoft">Tap</span>
+          <h2 className="font-display text-2xl text-slate-900">Profile & Targets</h2>
+          <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-slate-500">
+            edit
+          </span>
         </div>
       </summary>
 
-      <div className="mt-4 space-y-4">
-        <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-inkSoft">Profile</p>
-          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-            <label className="flex flex-col gap-1 text-xs text-inkSoft">
+      <div className="mt-5 space-y-5">
+        <div className="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4">
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Profile</p>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
               Age
               <input
                 type="number"
-                value={profile.age}
+                value={profileInputs.age}
                 min={13}
                 max={100}
+                inputMode="numeric"
                 onChange={(event) =>
-                  setProfile((prev) => ({
+                  setProfileInputs((prev) => ({
                     ...prev,
-                    age: parseWholeInput(event.target.value, prev.age, 13, 100),
+                    age: event.target.value,
                   }))
                 }
-                className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+                onBlur={commitProfileInputs}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
               />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-inkSoft">
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
               Height (ft)
               <input
                 type="number"
-                value={profile.heightFt}
+                value={profileInputs.heightFt}
                 min={3}
                 max={8}
+                inputMode="numeric"
                 onChange={(event) =>
-                  setProfile((prev) => ({
+                  setProfileInputs((prev) => ({
                     ...prev,
-                    heightFt: parseWholeInput(event.target.value, prev.heightFt, 3, 8),
+                    heightFt: event.target.value,
                   }))
                 }
-                className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+                onBlur={commitProfileInputs}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
               />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-inkSoft">
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
               Height (in)
               <input
                 type="number"
-                value={profile.heightIn}
+                value={profileInputs.heightIn}
                 min={0}
                 max={11}
+                inputMode="numeric"
                 onChange={(event) =>
-                  setProfile((prev) => ({
+                  setProfileInputs((prev) => ({
                     ...prev,
-                    heightIn: parseWholeInput(event.target.value, prev.heightIn, 0, 11),
+                    heightIn: event.target.value,
                   }))
                 }
-                className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+                onBlur={commitProfileInputs}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
               />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-inkSoft">
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
               Weight (lbs)
               <input
                 type="number"
-                value={profile.weightLbs}
+                value={profileInputs.weightLbs}
                 min={80}
                 max={550}
+                inputMode="numeric"
                 onChange={(event) =>
-                  setProfile((prev) => ({
+                  setProfileInputs((prev) => ({
                     ...prev,
-                    weightLbs: parseWholeInput(event.target.value, prev.weightLbs, 80, 550),
+                    weightLbs: event.target.value,
                   }))
                 }
-                className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+                onBlur={commitProfileInputs}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
               />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-inkSoft">
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
               Sex
               <select
                 value={profile.sex}
@@ -777,64 +874,64 @@ export default function Home() {
                     sex: event.target.value as Sex,
                   }))
                 }
-                className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
               >
                 <option value="female">Female</option>
                 <option value="male">Male</option>
                 <option value="other">Other</option>
               </select>
             </label>
-            <label className="flex flex-col gap-1 text-xs text-inkSoft">
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
               Avg steps/day
               <input
                 type="number"
-                value={profile.avgSteps}
+                value={profileInputs.avgSteps}
                 min={1000}
                 max={40000}
                 step={100}
+                inputMode="numeric"
                 onChange={(event) =>
-                  setProfile((prev) => ({
+                  setProfileInputs((prev) => ({
                     ...prev,
-                    avgSteps: parseWholeInput(event.target.value, prev.avgSteps, 1000, 40000),
+                    avgSteps: event.target.value,
                   }))
                 }
-                className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+                onBlur={commitProfileInputs}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
               />
             </label>
           </div>
         </div>
 
-        <div>
+        <div className="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs uppercase tracking-[0.2em] text-inkSoft">Daily Targets</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Daily Targets</p>
             <button
               type="button"
               onClick={recalcTargetsFromProfile}
-              className="rounded-full border border-line px-3 py-1 text-xs uppercase tracking-[0.2em] text-inkSoft"
+              className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-500 hover:bg-slate-100"
             >
               Auto-fill
             </button>
           </div>
-          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
             {NUTRIENT_KEYS.map((key) => (
-              <label key={key} className="flex flex-col gap-1 text-xs text-inkSoft">
+              <label key={key} className="flex flex-col gap-1 text-xs text-slate-500">
                 {NUTRIENT_LABELS[key]} ({NUTRIENT_UNITS[key]})
                 <input
                   type="number"
-                  value={targets[key]}
+                  value={targetInputs[key]}
                   min={NUTRIENT_LIMITS[key].min}
                   max={NUTRIENT_LIMITS[key].max}
+                  inputMode="decimal"
                   onChange={(event) =>
-                    setTargets((prev) => ({
+                    setTargetInputs((prev) => ({
                       ...prev,
-                      [key]: clamp(
-                        toNumber(event.target.value, prev[key]),
-                        NUTRIENT_LIMITS[key].min,
-                        NUTRIENT_LIMITS[key].max,
-                      ),
+                      [key]: event.target.value,
                     }))
                   }
-                  className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+                  onBlur={commitTargetInputs}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
                 />
               </label>
             ))}
@@ -845,30 +942,40 @@ export default function Home() {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-cream via-white to-white px-4 py-6">
-      <main className="mx-auto flex w-full max-w-2xl flex-col gap-6">
-        <header className="space-y-2">
-          <p className="text-xs uppercase tracking-[0.35em] text-inkSoft">Daily Nutrition</p>
-          <h1 className="font-display text-4xl text-ink">Optimal Tracker</h1>
-          <p className="text-sm text-inkSoft">
+    <div className="relative min-h-screen overflow-x-clip bg-gradient-to-br from-amber-50 via-stone-50 to-emerald-50 px-4 py-6 sm:px-6">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -left-16 -top-24 h-64 w-64 rounded-full bg-emerald-200/45 blur-3xl"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-20 top-24 h-72 w-72 rounded-full bg-amber-200/50 blur-3xl"
+      />
+
+      <main className="relative mx-auto flex w-full max-w-3xl flex-col gap-6">
+        <header className="rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-[0_24px_55px_rgba(15,23,42,0.12)]">
+          <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Daily Nutrition</p>
+          <h1 className="mt-2 font-display text-4xl text-slate-900">Optimal Tracker</h1>
+          <p className="mt-2 text-sm text-slate-600">
             AI estimates are directional, not medical-grade measurements.
           </p>
+          <div className="mt-4 h-1 w-28 rounded-full bg-gradient-to-r from-emerald-500 via-amber-400 to-rose-500" />
         </header>
 
-        <section className="rounded-xl border border-line bg-white/70 px-3 py-3">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            <div className="rounded-lg border border-line/70 bg-white/80 px-2 py-2">
-              <p className="text-[10px] uppercase tracking-[0.25em] text-inkSoft/70">
+        <section className="rounded-3xl border border-slate-200/80 bg-white/95 p-4 shadow-[0_18px_45px_rgba(15,23,42,0.1)]">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-3 py-3">
+              <p className="text-[10px] uppercase tracking-[0.25em] text-slate-500">
                 Meals
               </p>
-              <p className="mt-1 text-xl font-semibold text-ink">{selectedEntries.length}</p>
+              <p className="mt-2 text-2xl font-semibold text-slate-900">{selectedEntries.length}</p>
             </div>
-            <div className="rounded-lg border border-line/70 bg-white/80 px-2 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-[10px] uppercase tracking-[0.25em] text-inkSoft/70">
+            <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-3 py-3 sm:col-span-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[10px] uppercase tracking-[0.25em] text-slate-500">
                   Day Optimal
                 </p>
-                <div className="flex items-center gap-1 text-[10px] text-inkSoft/70">
+                <div className="flex items-center gap-1 text-[10px] text-slate-500">
                   <span>Goal</span>
                   <input
                     type="number"
@@ -881,40 +988,40 @@ export default function Home() {
                       )
                     }
                     onBlur={handleGoalSave}
-                    className="w-12 rounded-full border border-line bg-white px-2 py-0.5 text-right text-base"
+                    className="w-14 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-right text-base text-slate-900"
                   />
                   <span>%</span>
                 </div>
               </div>
-              <p className="mt-1 text-xl font-semibold text-ink">{selectedAverage}%</p>
-              <div className="mt-1 h-1.5 w-full rounded-full bg-line/40">
+              <p className="mt-2 text-2xl font-semibold text-slate-900">{selectedAverage}%</p>
+              <div className="mt-2 h-2.5 w-full rounded-full bg-slate-200/70">
                 <div
                   className={clsx(
-                    "h-1.5 rounded-full transition-colors",
-                    getStatusColor(selectedAverage, optimalGoal),
+                    "h-2.5 rounded-full transition-colors",
+                    getTrafficColor(dayOptimalCoverage),
                   )}
-                  style={{ width: `${Math.min(selectedAverage, 100)}%` }}
+                  style={{ width: `${Math.min(dayOptimalCoverage, 100)}%` }}
                 />
               </div>
             </div>
-            <div className="rounded-lg border border-line/70 bg-white/80 px-2 py-2">
-              <p className="text-[10px] uppercase tracking-[0.25em] text-inkSoft/70">
+            <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-3 py-3 sm:col-span-3">
+              <p className="text-[10px] uppercase tracking-[0.25em] text-slate-500">
                 Average feel
               </p>
-              <p className="mt-1 text-xl font-semibold text-ink">
+              <p className="mt-1 text-xl font-semibold text-slate-900">
                 {todayFeelAverage ? `${todayFeelAverage}/5` : "--"}
+              </p>
+              <p className="mt-2 text-xs text-slate-500">
+                Today average: {todayAverage}% optimal
+                {todayFeelAverage ? ` · Avg feel ${todayFeelAverage}/5` : ""}
               </p>
             </div>
           </div>
-          <p className="mt-3 text-xs text-inkSoft">
-            Today average: {todayAverage}% optimal
-            {todayFeelAverage ? ` · Avg feel ${todayFeelAverage}/5` : ""}
-          </p>
         </section>
 
-        <section className="rounded-2xl border border-line bg-white/90 p-4 shadow-soft">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <label className="flex flex-col gap-2 text-xs uppercase tracking-[0.2em] text-inkSoft">
+        <section className="rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-[0_22px_50px_rgba(15,23,42,0.1)]">
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <label className="flex flex-col gap-2 text-xs uppercase tracking-[0.2em] text-slate-500">
               Meal
               <textarea
                 rows={5}
@@ -922,11 +1029,11 @@ export default function Home() {
                 onChange={(event) => handleMealChange(event.target.value)}
                 placeholder="Type what you ate in plain English..."
                 required
-                className="min-h-[140px] rounded-2xl border border-line bg-white px-4 py-3 text-base text-ink"
+                className="min-h-[150px] rounded-2xl border border-slate-200 bg-slate-50/40 px-4 py-3 text-base text-slate-900"
               />
             </label>
 
-            <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.2em] text-inkSoft">
+            <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.2em] text-slate-500">
               How did you feel after this meal?
               <select
                 value={draft.feelAfter ?? ""}
@@ -944,7 +1051,7 @@ export default function Home() {
                       : prev.meta,
                   }));
                 }}
-                className="w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
               >
                 <option value="">Not rated</option>
                 <option value="1">1 - Very bad</option>
@@ -955,63 +1062,75 @@ export default function Home() {
               </select>
             </label>
 
-            <p className="text-xs text-inkSoft">
+            <p className="text-xs text-slate-600">
               AI uses your profile, nutrient targets, and today&apos;s logged meals for tailored
               recommendations (defaulting to simple, low-cook next meals).
             </p>
 
             {estimate ? (
-              <div className="rounded-xl border border-line bg-white px-3 py-3 text-sm text-ink">
-                <p className="text-xs uppercase tracking-[0.2em] text-inkSoft">AI Insight</p>
+              <div className="rounded-2xl border border-slate-200/80 bg-slate-50/70 px-4 py-4 text-sm text-slate-900">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">AI Insight</p>
                 <div className="mt-2 flex items-center justify-between gap-3">
-                  <p className="text-lg font-semibold text-ink">
+                  <p className="text-lg font-semibold text-slate-900">
                     {estimate.optimal_score}% optimal
                   </p>
-                  <span className="rounded-full border border-line px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-inkSoft">
+                  <span className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-slate-500">
                     {estimate.confidence} confidence
                   </span>
                 </div>
-                <p className="mt-2 text-sm text-ink">{estimate.summary}</p>
+                <div className="mt-2 h-2.5 w-full rounded-full bg-slate-200/70">
+                  <div
+                    className={clsx(
+                      "h-2.5 rounded-full transition-colors",
+                      getTrafficColor(estimateCoverage),
+                    )}
+                    style={{ width: `${Math.min(estimateCoverage, 100)}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-sm text-slate-900">{estimate.summary}</p>
 
-                <div className="mt-3 grid gap-2 text-xs text-inkSoft sm:grid-cols-2">
+                <div className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
                   <div>
                     <p className="uppercase tracking-[0.2em]">Good</p>
-                    <p className="mt-1 text-sm text-ink">
+                    <p className="mt-1 text-sm text-slate-900">
                       {estimate.positive.length ? estimate.positive.join(", ") : "-"}
                     </p>
                   </div>
                   <div>
                     <p className="uppercase tracking-[0.2em]">Improve</p>
-                    <p className="mt-1 text-sm text-ink">
+                    <p className="mt-1 text-sm text-slate-900">
                       {estimate.improve.length ? estimate.improve.join(", ") : "-"}
                     </p>
                   </div>
                 </div>
 
-                <div className="mt-3 rounded-lg border border-line/70 bg-cream/60 px-3 py-2">
-                  <p className="text-xs uppercase tracking-[0.2em] text-inkSoft">
+                <div className="mt-3 rounded-xl border border-emerald-200/80 bg-emerald-50/70 px-3 py-3">
+                  <p className="text-xs uppercase tracking-[0.2em] text-emerald-700">
                     Next meal recommendation
                   </p>
-                  <p className="mt-1 text-sm text-ink">
+                  <p className="mt-1 text-sm text-slate-900">
                     {estimate.recommendation || "No recommendation returned."}
                   </p>
                 </div>
 
                 <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
                   {(["protein_g", "carbs_g", "fat_g", "fiber_g"] as const).map((key) => (
-                    <div key={key} className="rounded-lg border border-line/70 bg-white px-2 py-2">
-                      <p className="uppercase tracking-[0.15em] text-inkSoft/70">
+                    <div
+                      key={key}
+                      className="rounded-xl border border-slate-200/80 bg-white px-2 py-2"
+                    >
+                      <p className="uppercase tracking-[0.15em] text-slate-500">
                         {NUTRIENT_LABELS[key]}
                       </p>
-                      <p className="mt-1 text-sm font-semibold text-ink">
+                      <p className="mt-1 text-sm font-semibold text-slate-900">
                         {Math.round(estimate.nutrients[key])} {NUTRIENT_UNITS[key]}
                       </p>
                     </div>
                   ))}
                 </div>
 
-                <details className="mt-3 rounded-lg border border-line/70 bg-white px-3 py-2">
-                  <summary className="cursor-pointer list-none text-xs uppercase tracking-[0.2em] text-inkSoft">
+                <details className="mt-3 rounded-xl border border-slate-200/80 bg-white px-3 py-2">
+                  <summary className="cursor-pointer list-none text-xs uppercase tracking-[0.2em] text-slate-500">
                     Micronutrient estimate
                   </summary>
                   <div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
@@ -1025,11 +1144,14 @@ export default function Home() {
                         "vitamin_c_mg",
                       ] as const
                     ).map((key) => (
-                      <div key={key} className="rounded-lg border border-line/70 bg-white px-2 py-2">
-                        <p className="uppercase tracking-[0.15em] text-inkSoft/70">
+                      <div
+                        key={key}
+                        className="rounded-xl border border-slate-200/80 bg-slate-50/70 px-2 py-2"
+                      >
+                        <p className="uppercase tracking-[0.15em] text-slate-500">
                           {NUTRIENT_LABELS[key]}
                         </p>
-                        <p className="mt-1 text-sm font-semibold text-ink">
+                        <p className="mt-1 text-sm font-semibold text-slate-900">
                           {Math.round(estimate.nutrients[key])} {NUTRIENT_UNITS[key]}
                         </p>
                       </div>
@@ -1039,17 +1161,17 @@ export default function Home() {
               </div>
             ) : null}
 
-            {error ? <p className="text-sm text-red-600">{error}</p> : null}
+            {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
             <div className="flex flex-wrap items-center gap-3">
               <button
                 type="submit"
                 disabled={isEstimating}
                 className={clsx(
-                  "rounded-full px-4 py-2 text-sm font-semibold text-white transition",
+                  "rounded-full px-4 py-2 text-sm font-semibold text-white shadow-sm transition",
                   readyToSave
                     ? "bg-emerald-600 hover:bg-emerald-700"
-                    : "bg-ink hover:bg-ink/90",
+                    : "bg-slate-900 hover:bg-slate-800",
                 )}
               >
                 {isEstimating ? "Analyzing..." : readyToSave ? "Save meal" : "Analyze meal"}
@@ -1058,7 +1180,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={runEstimate}
-                  className="rounded-full border border-line px-3 py-2 text-xs uppercase tracking-[0.2em] text-inkSoft"
+                  className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs uppercase tracking-[0.2em] text-slate-600 hover:bg-slate-100"
                 >
                   Re-estimate
                 </button>
@@ -1066,7 +1188,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={resetDraft}
-                className="rounded-full border border-line px-3 py-2 text-xs uppercase tracking-[0.2em] text-inkSoft"
+                className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs uppercase tracking-[0.2em] text-slate-600 hover:bg-slate-100"
               >
                 Clear
               </button>
@@ -1074,14 +1196,16 @@ export default function Home() {
           </form>
         </section>
 
-        <details className="rounded-2xl border border-line bg-white/90 p-4 shadow-soft">
+        <details className="rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.1)]">
           <summary className="cursor-pointer list-none">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="font-display text-2xl text-ink">Daily Coverage</h2>
-              <span className="text-xs uppercase tracking-[0.2em] text-inkSoft">Tap</span>
+              <h2 className="font-display text-2xl text-slate-900">Daily Coverage</h2>
+              <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                open
+              </span>
             </div>
           </summary>
-          <p className="mt-2 text-xs text-inkSoft">
+          <p className="mt-2 text-xs text-slate-500">
             {selectedDateLabel}
             {isToday ? " · Today" : ""}
             {isToday && estimate ? " · projected with current draft meal" : ""}
@@ -1103,27 +1227,27 @@ export default function Home() {
               const actual = coverageTotals[key];
               const target = targets[key];
               const coverage = getCoveragePercent(actual, target, isUpperBound);
-              const color =
-                coverage >= 90
-                  ? "bg-emerald-500"
-                  : coverage >= 70
-                    ? "bg-amber-400"
-                    : "bg-rose-500";
 
               return (
-                <div key={key} className="rounded-lg border border-line/70 bg-white px-3 py-2">
+                <div
+                  key={key}
+                  className="rounded-xl border border-slate-200/80 bg-slate-50/70 px-3 py-2"
+                >
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs uppercase tracking-[0.2em] text-inkSoft">
+                    <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
                       {NUTRIENT_LABELS[key]}
                     </p>
-                    <p className="text-xs text-inkSoft">
+                    <p className="text-xs text-slate-500">
                       {Math.round(actual)} / {Math.round(target)} {NUTRIENT_UNITS[key]}
                       {isUpperBound ? " max" : ""}
                     </p>
                   </div>
-                  <div className="mt-2 h-1.5 w-full rounded-full bg-line/30">
+                  <div className="mt-2 h-2.5 w-full rounded-full bg-slate-200/70">
                     <div
-                      className={clsx("h-1.5 rounded-full transition-colors", color)}
+                      className={clsx(
+                        "h-2.5 rounded-full transition-colors",
+                        getTrafficColor(coverage),
+                      )}
                       style={{ width: `${Math.min(coverage, 100)}%` }}
                     />
                   </div>
@@ -1133,11 +1257,11 @@ export default function Home() {
           </div>
         </details>
 
-        <section className="rounded-2xl border border-line bg-white/90 p-4 shadow-soft">
+        <section className="rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-[0_20px_48px_rgba(15,23,42,0.1)]">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h2 className="font-display text-2xl text-ink">Entries</h2>
-              <p className="text-xs text-inkSoft">
+              <h2 className="font-display text-2xl text-slate-900">Entries</h2>
+              <p className="text-xs text-slate-500">
                 {selectedDateLabel}
                 {isToday ? " · Today" : ""}
               </p>
@@ -1146,14 +1270,14 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => shiftSelectedDate(-1)}
-                className="rounded-full border border-line px-3 py-1 text-xs uppercase tracking-[0.2em] text-inkSoft"
+                className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-600 hover:bg-slate-100"
               >
                 Prev
               </button>
               <button
                 type="button"
                 onClick={() => setSelectedDate(new Date())}
-                className="rounded-full border border-line px-3 py-1 text-xs uppercase tracking-[0.2em] text-inkSoft"
+                className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-600 hover:bg-slate-100"
               >
                 Today
               </button>
@@ -1162,7 +1286,7 @@ export default function Home() {
                 onClick={() => shiftSelectedDate(1)}
                 disabled={isToday}
                 className={clsx(
-                  "rounded-full border border-line px-3 py-1 text-xs uppercase tracking-[0.2em] text-inkSoft",
+                  "rounded-full border border-slate-200 bg-white px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-600 hover:bg-slate-100",
                   isToday && "cursor-not-allowed opacity-50",
                 )}
               >
@@ -1173,33 +1297,38 @@ export default function Home() {
 
           <div className="mt-4 space-y-3">
             {selectedEntryRows.length === 0 ? (
-              <p className="text-sm text-inkSoft">No entries yet.</p>
+              <p className="text-sm text-slate-500">No entries yet.</p>
             ) : (
               selectedEntryRows.map(({ entry, meta }) => (
-                <div key={entry.id} className="rounded-xl border border-line bg-white px-3 py-3">
+                <div
+                  key={entry.id}
+                  className="rounded-2xl border border-slate-200/80 bg-slate-50/70 px-3 py-3"
+                >
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-sm font-semibold text-ink">{entry.mealText}</p>
-                        <p className="text-xs text-inkSoft">{formatDisplayTime(entry.timestamp)}</p>
+                        <p className="text-sm font-semibold text-slate-900">{entry.mealText}</p>
+                        <p className="text-xs text-slate-500">
+                          {formatDisplayTime(entry.timestamp)}
+                        </p>
                       </div>
-                      <span className="text-sm font-semibold text-accentDeep">
+                      <span className="text-sm font-semibold text-emerald-700">
                         {entry.wholeFoodsPercent}% optimal
                       </span>
                     </div>
-                    <p className="text-sm text-ink">{entry.llmReason}</p>
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-inkSoft">
-                      <span className="rounded-full border border-line px-2 py-0.5">
+                    <p className="text-sm text-slate-800">{entry.llmReason}</p>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                      <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5">
                         Feel: {formatFeelLabel(meta?.feel_after ?? null)}
                       </span>
                       {meta?.confidence ? (
-                        <span className="rounded-full border border-line px-2 py-0.5">
+                        <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5">
                           Confidence: {meta.confidence}
                         </span>
                       ) : null}
                     </div>
                     {meta?.recommendation ? (
-                      <p className="rounded-lg border border-line/70 bg-cream/50 px-2 py-2 text-xs text-ink">
+                      <p className="rounded-xl border border-emerald-200/80 bg-emerald-50/60 px-2 py-2 text-xs text-slate-800">
                         Next meal: {meta.recommendation}
                       </p>
                     ) : null}
@@ -1207,7 +1336,7 @@ export default function Home() {
                       <button
                         type="button"
                         onClick={() => deleteEntry(entry.id)}
-                        className="rounded-full border border-line px-3 py-1 text-xs uppercase tracking-[0.2em] text-inkSoft"
+                        className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-600 hover:bg-slate-100"
                       >
                         Delete
                       </button>
@@ -1221,8 +1350,8 @@ export default function Home() {
 
         {profileTargetsSection}
 
-        <footer className="pb-6 text-center text-[10px] uppercase tracking-[0.35em] text-inkSoft/70">
-          v8
+        <footer className="pb-6 text-center text-[10px] uppercase tracking-[0.35em] text-slate-500/80">
+          v9
         </footer>
       </main>
     </div>
