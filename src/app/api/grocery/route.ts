@@ -20,6 +20,17 @@ const MODEL_CANDIDATES = [
   "gemini-pro",
 ];
 
+const DEFAULT_EXCLUDED_INGREDIENTS = [
+  "fish",
+  "salmon",
+  "tuna",
+  "tofu",
+  "tempeh",
+  "beans",
+  "lentils",
+  "chickpeas",
+];
+
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 
@@ -31,10 +42,24 @@ const toNumber = (value: unknown, fallback = 0) => {
 const toRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 
-const normalizeStringList = (value: unknown, max = 12) =>
+const normalizeStringList = (value: unknown, max = 8) =>
   Array.isArray(value)
     ? value.map(String).map((item) => item.trim()).filter(Boolean).slice(0, max)
     : [];
+
+const normalizeExclusions = (value: unknown) => {
+  const parsed = normalizeStringList(value, 20).map((item) => item.toLowerCase());
+  const merged = new Set([...DEFAULT_EXCLUDED_INGREDIENTS, ...parsed]);
+  return Array.from(merged);
+};
+
+const filterItemsByExclusions = (items: string[], exclusions: string[]) => {
+  const blocked = exclusions.map((item) => item.toLowerCase());
+  return items.filter((line) => {
+    const lower = line.toLowerCase();
+    return !blocked.some((term) => lower.includes(term));
+  });
+};
 
 const parseJsonFromText = (text: string) => {
   const trimmed = text.trim();
@@ -80,14 +105,14 @@ const buildFallbackPlan = (targets: MacroTargets) => {
   const fiberServings = clamp(Math.round(weekly.fiber_g / 8), 14, 42);
 
   return {
-    summary: "Simple weekly staples to cover your protein, carbs, fat, and fiber targets.",
+    summary: "Simple weekly staples to hit your macro targets with minimal cooking.",
     items: [
-      `Lean protein base (chicken, turkey, tuna, tofu, or tempeh): ${proteinServings} servings`,
-      "Eggs or egg whites: 1-2 cartons/dozen",
-      "Greek yogurt or cottage cheese: 4-7 single servings",
-      `Carb base (rice, potatoes, oats, or whole-grain wraps): ${carbServings} servings`,
-      `Beans or lentils (canned works): ${Math.max(6, Math.round(fiberServings / 2))} cans`,
-      "Frozen vegetables (any mix): 4-7 bags",
+      `Lean protein base (chicken, turkey, lean beef, or eggs): ${proteinServings} servings`,
+      "Eggs or liquid egg whites: 1-2 cartons/dozen",
+      "Greek yogurt or cottage cheese: 5-7 servings",
+      `Carb base (rice, potatoes, oats, or wraps): ${carbServings} servings`,
+      `Fiber add-ons (whole-grain cereal + fruit + veggies): ${fiberServings} servings total`,
+      "Frozen vegetables (any mix): 5-7 bags",
       "Fruit (banana, apple, berries, or frozen fruit): 14-21 servings",
       "Healthy fats (olive oil, avocado, nuts/seeds): 7-14 servings",
     ],
@@ -101,6 +126,7 @@ export async function POST(request: Request) {
   const payload = toRecord(body);
   const profile = toRecord(payload.profile);
   const targets = normalizeTargets(toRecord(payload.targets));
+  const excludedIngredients = normalizeExclusions(payload.excluded_ingredients);
   const weekly = toWeekly(targets);
 
   if (!process.env.GEMINI_API_KEY) {
@@ -121,6 +147,7 @@ export async function POST(request: Request) {
     preferences: {
       simple: true,
       low_cook_time: true,
+      excluded_ingredients: excludedIngredients,
     },
   };
 
@@ -131,9 +158,12 @@ Create a simple weekly grocery list to help hit macro targets.
 Rules:
 - Keep this STUPID SIMPLE.
 - Do not assume specific pantry items.
-- Use flexible wording with options (e.g., "chicken or tofu").
+- Use flexible wording with options.
 - Focus on protein, carbs, fat, fiber coverage.
 - Keep prep low-cook and busy-person friendly.
+- Use 6-8 items only.
+- NEVER include fish, tofu, tempeh, beans, lentils, or chickpeas.
+- If fiber is low, use fruit, oats, high-fiber wraps/cereal, potatoes with skin, and vegetables.
 
 Return STRICT JSON only:
 {
@@ -179,13 +209,16 @@ ${JSON.stringify(context, null, 2)}`;
     }
 
     const parsed = parseJsonFromText(responseText);
-    const items = normalizeStringList(parsed.items, 14);
+    const items = filterItemsByExclusions(
+      normalizeStringList(parsed.items, 8),
+      excludedIngredients,
+    );
     const summary =
       typeof parsed.summary === "string"
         ? parsed.summary.trim()
         : "Simple weekly staples to support your macro targets.";
 
-    if (!items.length) {
+    if (items.length < 4) {
       return NextResponse.json(buildFallbackPlan(targets));
     }
 

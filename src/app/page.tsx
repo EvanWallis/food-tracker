@@ -912,6 +912,7 @@ export default function Home() {
           average_steps_day: committedProfile.avgSteps,
         },
         targets: committedTargets,
+        excluded_ingredients: ["fish", "tuna", "salmon", "tofu", "tempeh", "beans", "lentils", "chickpeas"],
       }),
     });
     setIsGeneratingGrocery(false);
@@ -1068,6 +1069,60 @@ export default function Home() {
         className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
       />
     </label>
+  );
+
+  const grocerySection = (
+    <details className="rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.1)]">
+      <summary className="cursor-pointer list-none">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-display text-2xl text-slate-900">Weekly Grocery List</h2>
+          <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-slate-500">
+            open
+          </span>
+        </div>
+      </summary>
+
+      <p className="mt-2 text-xs text-slate-500">
+        One tap list from your macro targets. No fish, tofu, or beans.
+      </p>
+
+      <div className="mt-3">
+        <button
+          type="button"
+          onClick={runGroceryPlan}
+          disabled={isGeneratingGrocery}
+          className={clsx(
+            "rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] text-white transition",
+            isGeneratingGrocery
+              ? "cursor-not-allowed bg-slate-400"
+              : "bg-slate-900 hover:bg-slate-800",
+          )}
+        >
+          {isGeneratingGrocery ? "Building..." : "Suggest grocery list"}
+        </button>
+      </div>
+
+      {groceryError ? <p className="mt-3 text-sm text-rose-600">{groceryError}</p> : null}
+
+      {groceryPlan ? (
+        <div className="mt-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 px-4 py-3">
+          <p className="text-sm text-slate-900">{groceryPlan.summary}</p>
+          <p className="mt-1 text-xs text-slate-500">
+            Weekly macro target: {Math.round(groceryPlan.weekly_macros.protein_g)}g protein ·{" "}
+            {Math.round(groceryPlan.weekly_macros.carbs_g)}g carbs ·{" "}
+            {Math.round(groceryPlan.weekly_macros.fat_g)}g fat ·{" "}
+            {Math.round(groceryPlan.weekly_macros.fiber_g)}g fiber
+          </p>
+          <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-800">
+            {groceryPlan.items.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <p className="mt-3 text-sm text-slate-500">No list yet.</p>
+      )}
+    </details>
   );
 
   const profileTargetsSection = (
@@ -1309,56 +1364,6 @@ export default function Home() {
               </p>
             </div>
           </div>
-        </section>
-
-        <section className="rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.1)]">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="font-display text-2xl text-slate-900">Weekly Grocery List</h2>
-              <p className="text-xs text-slate-500">
-                One tap list based on your current daily targets.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={runGroceryPlan}
-              disabled={isGeneratingGrocery}
-              className={clsx(
-                "rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] text-white transition",
-                isGeneratingGrocery
-                  ? "cursor-not-allowed bg-slate-400"
-                  : "bg-slate-900 hover:bg-slate-800",
-              )}
-            >
-              {isGeneratingGrocery ? "Building..." : "Suggest grocery list"}
-            </button>
-          </div>
-
-          {groceryError ? <p className="mt-3 text-sm text-rose-600">{groceryError}</p> : null}
-
-          {groceryPlan ? (
-            <div className="mt-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 px-4 py-3">
-              <p className="text-sm text-slate-900">{groceryPlan.summary}</p>
-              <p className="mt-1 text-xs text-slate-500">
-                Weekly macro target: {Math.round(groceryPlan.weekly_macros.protein_g)}g protein
-                · {Math.round(groceryPlan.weekly_macros.carbs_g)}g carbs ·{" "}
-                {Math.round(groceryPlan.weekly_macros.fat_g)}g fat ·{" "}
-                {Math.round(groceryPlan.weekly_macros.fiber_g)}g fiber
-              </p>
-              {groceryPlan.source === "fallback" ? (
-                <p className="mt-1 text-xs text-slate-500">
-                  Using backup list format for this request.
-                </p>
-              ) : null}
-              <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-800">
-                {groceryPlan.items.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </div>
-          ) : (
-            <p className="mt-3 text-sm text-slate-500">No list yet. Tap the button above.</p>
-          )}
         </section>
 
         <section className="rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-[0_22px_50px_rgba(15,23,42,0.1)]">
@@ -1726,6 +1731,7 @@ export default function Home() {
         </section>
 
         {profileTargetsSection}
+        {grocerySection}
 
         <footer className="pb-6 text-center text-[10px] uppercase tracking-[0.35em] text-slate-500/80">
           v9
