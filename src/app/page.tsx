@@ -330,6 +330,16 @@ const sumNutrientsForEntries = (entries: MealEntry[]) =>
     return addNutrients(acc, meta.nutrients);
   }, emptyNutrients());
 
+const getCoveragePercent = (actual: number, target: number, upperBound = false) => {
+  if (!target) return 0;
+  if (upperBound) {
+    if (actual <= target) return 100;
+    const over = ((actual - target) / target) * 100;
+    return clamp(Math.round(100 - over), 0, 100);
+  }
+  return clamp(Math.round((actual / target) * 100), 0, 140);
+};
+
 const formatFeelLabel = (value: number | null) => {
   if (!value) return "Not rated";
   if (value <= 2) return `${value}/5 (low energy)`;
@@ -461,6 +471,10 @@ export default function Home() {
 
   const selectedAverage = useMemo(() => weightedAverage(selectedEntries), [selectedEntries]);
   const todayAverage = useMemo(() => weightedAverage(todayEntries), [todayEntries]);
+  const selectedTotals = useMemo(
+    () => sumNutrientsForEntries(selectedEntries),
+    [selectedEntries],
+  );
   const todayTotals = useMemo(() => sumNutrientsForEntries(todayEntries), [todayEntries]);
 
   const todayFeelAverage = useMemo(() => {
@@ -477,6 +491,10 @@ export default function Home() {
     month: "short",
     day: "numeric",
   });
+  const coverageTotals = useMemo(() => {
+    if (isToday && estimate) return addNutrients(todayTotals, estimate.nutrients);
+    return selectedTotals;
+  }, [estimate, isToday, selectedTotals, todayTotals]);
 
   const selectedEntryRows = useMemo(
     () =>
@@ -1055,6 +1073,65 @@ export default function Home() {
             </div>
           </form>
         </section>
+
+        <details className="rounded-2xl border border-line bg-white/90 p-4 shadow-soft">
+          <summary className="cursor-pointer list-none">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-display text-2xl text-ink">Daily Coverage</h2>
+              <span className="text-xs uppercase tracking-[0.2em] text-inkSoft">Tap</span>
+            </div>
+          </summary>
+          <p className="mt-2 text-xs text-inkSoft">
+            {selectedDateLabel}
+            {isToday ? " · Today" : ""}
+            {isToday && estimate ? " · projected with current draft meal" : ""}
+          </p>
+
+          <div className="mt-4 grid gap-2">
+            {(
+              [
+                "protein_g",
+                "carbs_g",
+                "fat_g",
+                "fiber_g",
+                "potassium_mg",
+                "magnesium_mg",
+                "sodium_mg",
+              ] as const
+            ).map((key) => {
+              const isUpperBound = key === "sodium_mg";
+              const actual = coverageTotals[key];
+              const target = targets[key];
+              const coverage = getCoveragePercent(actual, target, isUpperBound);
+              const color =
+                coverage >= 90
+                  ? "bg-emerald-500"
+                  : coverage >= 70
+                    ? "bg-amber-400"
+                    : "bg-rose-500";
+
+              return (
+                <div key={key} className="rounded-lg border border-line/70 bg-white px-3 py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs uppercase tracking-[0.2em] text-inkSoft">
+                      {NUTRIENT_LABELS[key]}
+                    </p>
+                    <p className="text-xs text-inkSoft">
+                      {Math.round(actual)} / {Math.round(target)} {NUTRIENT_UNITS[key]}
+                      {isUpperBound ? " max" : ""}
+                    </p>
+                  </div>
+                  <div className="mt-2 h-1.5 w-full rounded-full bg-line/30">
+                    <div
+                      className={clsx("h-1.5 rounded-full transition-colors", color)}
+                      style={{ width: `${Math.min(coverage, 100)}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </details>
 
         <section className="rounded-2xl border border-line bg-white/90 p-4 shadow-soft">
           <div className="flex flex-wrap items-center justify-between gap-2">
