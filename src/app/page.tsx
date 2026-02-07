@@ -15,32 +15,250 @@ type MealEntry = {
   sizeWeight: number | null;
 };
 
+type Sex = "female" | "male" | "other";
+type ActivityLevel = "low" | "moderate" | "high";
+type ConfidenceLevel = "low" | "medium" | "high";
+
+type NutritionProfile = {
+  age: number;
+  heightCm: number;
+  weightKg: number;
+  sex: Sex;
+  activity: ActivityLevel;
+};
+
+type NutrientTotals = {
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  fiber_g: number;
+  sodium_mg: number;
+  potassium_mg: number;
+  magnesium_mg: number;
+  calcium_mg: number;
+  iron_mg: number;
+  vitamin_c_mg: number;
+};
+
+type EntryMetaV2 = {
+  version: 2;
+  feel_after: number | null;
+  nutrients: NutrientTotals;
+  positive: string[];
+  improve: string[];
+  recommendation: string;
+  confidence: ConfidenceLevel;
+};
+
 type Estimate = {
-  percent: number;
-  reason: string;
-  whole_foods_items: string[];
-  non_whole_foods_items: string[];
+  optimal_score: number;
+  summary: string;
+  positive: string[];
+  improve: string[];
+  nutrients: NutrientTotals;
+  recommendation: string;
   size_label: string;
   size_weight: number;
+  confidence: ConfidenceLevel;
 };
 
 type Draft = {
   mealText: string;
-  wholeFoodsPercent: number;
+  optimalScore: number;
   llmReason: string;
   sizeLabel: string | null;
   sizeWeight: number | null;
+  feelAfter: number | null;
+  meta: EntryMetaV2 | null;
 };
 
-const formatDisplayTime = (value: string) => {
-  const date = new Date(value);
-  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const PROFILE_STORAGE_KEY = "food-tracker-profile-v1";
+const TARGETS_STORAGE_KEY = "food-tracker-targets-v1";
+
+const NUTRIENT_KEYS: Array<keyof NutrientTotals> = [
+  "protein_g",
+  "carbs_g",
+  "fat_g",
+  "fiber_g",
+  "sodium_mg",
+  "potassium_mg",
+  "magnesium_mg",
+  "calcium_mg",
+  "iron_mg",
+  "vitamin_c_mg",
+];
+
+const NUTRIENT_LABELS: Record<keyof NutrientTotals, string> = {
+  protein_g: "Protein",
+  carbs_g: "Carbs",
+  fat_g: "Fat",
+  fiber_g: "Fiber",
+  sodium_mg: "Sodium",
+  potassium_mg: "Potassium",
+  magnesium_mg: "Magnesium",
+  calcium_mg: "Calcium",
+  iron_mg: "Iron",
+  vitamin_c_mg: "Vitamin C",
 };
 
-const getStatusColor = (value: number, goal: number) => {
-  if (value >= goal) return "bg-emerald-500";
-  if (value >= goal - 10) return "bg-amber-400";
-  return "bg-rose-500";
+const NUTRIENT_UNITS: Record<keyof NutrientTotals, string> = {
+  protein_g: "g",
+  carbs_g: "g",
+  fat_g: "g",
+  fiber_g: "g",
+  sodium_mg: "mg",
+  potassium_mg: "mg",
+  magnesium_mg: "mg",
+  calcium_mg: "mg",
+  iron_mg: "mg",
+  vitamin_c_mg: "mg",
+};
+
+const NUTRIENT_LIMITS: Record<keyof NutrientTotals, { min: number; max: number }> = {
+  protein_g: { min: 0, max: 400 },
+  carbs_g: { min: 0, max: 800 },
+  fat_g: { min: 0, max: 300 },
+  fiber_g: { min: 0, max: 120 },
+  sodium_mg: { min: 0, max: 12000 },
+  potassium_mg: { min: 0, max: 10000 },
+  magnesium_mg: { min: 0, max: 2000 },
+  calcium_mg: { min: 0, max: 3000 },
+  iron_mg: { min: 0, max: 100 },
+  vitamin_c_mg: { min: 0, max: 2000 },
+};
+
+const DEFAULT_PROFILE: NutritionProfile = {
+  age: 34,
+  heightCm: 178,
+  weightKg: 82,
+  sex: "male",
+  activity: "moderate",
+};
+
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(max, Math.max(min, value));
+
+const toNumber = (value: unknown, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const emptyNutrients = (): NutrientTotals => ({
+  protein_g: 0,
+  carbs_g: 0,
+  fat_g: 0,
+  fiber_g: 0,
+  sodium_mg: 0,
+  potassium_mg: 0,
+  magnesium_mg: 0,
+  calcium_mg: 0,
+  iron_mg: 0,
+  vitamin_c_mg: 0,
+});
+
+const sanitizeNutrients = (
+  value: Partial<Record<keyof NutrientTotals, unknown>> | null | undefined,
+): NutrientTotals => {
+  const base = emptyNutrients();
+  for (const key of NUTRIENT_KEYS) {
+    const limits = NUTRIENT_LIMITS[key];
+    base[key] = clamp(toNumber(value?.[key], 0), limits.min, limits.max);
+  }
+  return base;
+};
+
+const addNutrients = (a: NutrientTotals, b: NutrientTotals): NutrientTotals => {
+  const combined = emptyNutrients();
+  for (const key of NUTRIENT_KEYS) {
+    const limits = NUTRIENT_LIMITS[key];
+    combined[key] = clamp(a[key] + b[key], limits.min, limits.max);
+  }
+  return combined;
+};
+
+const computeDefaultTargets = (profile: NutritionProfile): NutrientTotals => {
+  const protein = clamp(Math.round(profile.weightKg * 1.6), 80, 220);
+  const fat = clamp(Math.round(profile.weightKg * 0.8), 45, 120);
+  const carbsMultiplier =
+    profile.activity === "high" ? 3.1 : profile.activity === "moderate" ? 2.4 : 1.8;
+  const carbs = clamp(Math.round(profile.weightKg * carbsMultiplier), 120, 420);
+  const fiber = profile.sex === "male" ? 38 : profile.sex === "female" ? 28 : 33;
+  const iron = profile.sex === "female" ? 18 : 11;
+
+  return {
+    protein_g: protein,
+    carbs_g: carbs,
+    fat_g: fat,
+    fiber_g: fiber,
+    sodium_mg: 2300,
+    potassium_mg: 3500,
+    magnesium_mg: 420,
+    calcium_mg: 1000,
+    iron_mg: iron,
+    vitamin_c_mg: 90,
+  };
+};
+
+const parseEntryMeta = (notes: string | null): EntryMetaV2 | null => {
+  if (!notes) return null;
+  try {
+    const parsed = JSON.parse(notes) as Partial<EntryMetaV2>;
+    if (parsed.version !== 2) return null;
+    const feelRaw = toNumber(parsed.feel_after, -1);
+    const feelAfter = feelRaw >= 1 ? clamp(Math.round(feelRaw), 1, 5) : null;
+    const positive = Array.isArray(parsed.positive)
+      ? parsed.positive.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 4)
+      : [];
+    const improve = Array.isArray(parsed.improve)
+      ? parsed.improve.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 4)
+      : [];
+    const confidenceRaw = String(parsed.confidence ?? "medium").toLowerCase();
+    const confidence: ConfidenceLevel =
+      confidenceRaw === "low" || confidenceRaw === "high" ? confidenceRaw : "medium";
+
+    return {
+      version: 2,
+      feel_after: feelAfter,
+      nutrients: sanitizeNutrients(parsed.nutrients),
+      positive,
+      improve,
+      recommendation:
+        typeof parsed.recommendation === "string" ? parsed.recommendation.trim() : "",
+      confidence,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const normalizeStringList = (value: unknown, max = 4) =>
+  Array.isArray(value)
+    ? value.map(String).map((item) => item.trim()).filter(Boolean).slice(0, max)
+    : [];
+
+const normalizeEstimate = (value: unknown): Estimate => {
+  const record =
+    value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const confidenceRaw = String(record.confidence ?? "medium").toLowerCase();
+  const confidence: ConfidenceLevel =
+    confidenceRaw === "low" || confidenceRaw === "high" ? confidenceRaw : "medium";
+
+  return {
+    optimal_score: clamp(Math.round(toNumber(record.optimal_score, 0)), 0, 100),
+    summary: typeof record.summary === "string" ? record.summary.trim() : "",
+    positive: normalizeStringList(record.positive, 3),
+    improve: normalizeStringList(record.improve, 3),
+    nutrients: sanitizeNutrients(
+      record.nutrients && typeof record.nutrients === "object"
+        ? (record.nutrients as Partial<Record<keyof NutrientTotals, unknown>>)
+        : null,
+    ),
+    recommendation:
+      typeof record.recommendation === "string" ? record.recommendation.trim() : "",
+    size_label: typeof record.size_label === "string" ? record.size_label : "medium",
+    size_weight: clamp(toNumber(record.size_weight, 1), 0.5, 2),
+    confidence,
+  };
 };
 
 const getDayKey = (value: Date | string) => {
@@ -51,32 +269,75 @@ const getDayKey = (value: Date | string) => {
   return `${year}-${month}-${day}`;
 };
 
+const formatDisplayTime = (value: string) => {
+  const date = new Date(value);
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+};
+
 const weightedAverage = (entries: MealEntry[]) => {
   if (!entries.length) return 0;
   let weightSum = 0;
   let total = 0;
-  entries.forEach((entry) => {
+  for (const entry of entries) {
     const weight = entry.sizeWeight ?? 1;
     total += entry.wholeFoodsPercent * weight;
     weightSum += weight;
-  });
+  }
   return weightSum ? Math.round(total / weightSum) : 0;
+};
+
+const getStatusColor = (value: number, goal: number) => {
+  if (value >= goal) return "bg-emerald-500";
+  if (value >= goal - 10) return "bg-amber-400";
+  return "bg-rose-500";
+};
+
+const sumNutrientsForEntries = (entries: MealEntry[]) =>
+  entries.reduce((acc, entry) => {
+    const meta = parseEntryMeta(entry.notes);
+    if (!meta) return acc;
+    return addNutrients(acc, meta.nutrients);
+  }, emptyNutrients());
+
+const getCoveragePercent = (actual: number, target: number, upperBound = false) => {
+  if (!target) return 0;
+  if (upperBound) {
+    if (actual <= target) return 100;
+    const over = ((actual - target) / target) * 100;
+    return clamp(Math.round(100 - over), 0, 100);
+  }
+  return clamp(Math.round((actual / target) * 100), 0, 140);
+};
+
+const formatFeelLabel = (value: number | null) => {
+  if (!value) return "Not rated";
+  if (value <= 2) return `${value}/5 (low energy)`;
+  if (value === 3) return "3/5 (neutral)";
+  return `${value}/5 (good)`;
 };
 
 export default function Home() {
   const [entries, setEntries] = useState<MealEntry[]>([]);
-  const [goalPercent, setGoalPercent] = useState(80);
-  const [draft, setDraft] = useState<Draft>(() => ({
+  const [optimalGoal, setOptimalGoal] = useState(80);
+  const [profile, setProfile] = useState<NutritionProfile>(DEFAULT_PROFILE);
+  const [targets, setTargets] = useState<NutrientTotals>(
+    computeDefaultTargets(DEFAULT_PROFILE),
+  );
+  const [prefsHydrated, setPrefsHydrated] = useState(false);
+  const [draft, setDraft] = useState<Draft>({
     mealText: "",
-    wholeFoodsPercent: 80,
+    optimalScore: 80,
     llmReason: "",
     sizeLabel: null,
     sizeWeight: null,
-  }));
+    feelAfter: null,
+    meta: null,
+  });
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [readyToSave, setReadyToSave] = useState(false);
   const [isEstimating, setIsEstimating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState(() => new Date());
 
   const loadData = async () => {
     const [entriesResponse, settingsResponse] = await Promise.all([
@@ -90,7 +351,7 @@ export default function Home() {
     }
     if (settingsResponse.ok) {
       const settings = (await settingsResponse.json()) as { goalPercent: number };
-      setGoalPercent(settings.goalPercent ?? 80);
+      setOptimalGoal(clamp(Math.round(toNumber(settings.goalPercent, 80)), 0, 100));
     }
   };
 
@@ -98,20 +359,89 @@ export default function Home() {
     void loadData();
   }, []);
 
-  const [selectedDate, setSelectedDate] = useState(() => new Date());
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const profileRaw = window.localStorage.getItem(PROFILE_STORAGE_KEY);
+      if (profileRaw) {
+        const parsed = JSON.parse(profileRaw) as Partial<NutritionProfile>;
+        setProfile({
+          age: clamp(Math.round(toNumber(parsed.age, DEFAULT_PROFILE.age)), 13, 100),
+          heightCm: clamp(
+            Math.round(toNumber(parsed.heightCm, DEFAULT_PROFILE.heightCm)),
+            120,
+            230,
+          ),
+          weightKg: clamp(
+            Math.round(toNumber(parsed.weightKg, DEFAULT_PROFILE.weightKg)),
+            35,
+            250,
+          ),
+          sex:
+            parsed.sex === "female" || parsed.sex === "male" || parsed.sex === "other"
+              ? parsed.sex
+              : DEFAULT_PROFILE.sex,
+          activity:
+            parsed.activity === "low" ||
+            parsed.activity === "moderate" ||
+            parsed.activity === "high"
+              ? parsed.activity
+              : DEFAULT_PROFILE.activity,
+        });
+      }
+
+      const targetsRaw = window.localStorage.getItem(TARGETS_STORAGE_KEY);
+      if (targetsRaw) {
+        const parsed = JSON.parse(targetsRaw) as Partial<
+          Record<keyof NutrientTotals, unknown>
+        >;
+        setTargets(sanitizeNutrients(parsed));
+      }
+    } catch {
+      setProfile(DEFAULT_PROFILE);
+      setTargets(computeDefaultTargets(DEFAULT_PROFILE));
+    } finally {
+      setPrefsHydrated(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!prefsHydrated || typeof window === "undefined") return;
+    window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+    window.localStorage.setItem(TARGETS_STORAGE_KEY, JSON.stringify(targets));
+  }, [prefsHydrated, profile, targets]);
+
   const todayKey = getDayKey(new Date());
   const selectedKey = getDayKey(selectedDate);
   const isToday = selectedKey === todayKey;
+
   const selectedEntries = useMemo(
     () => entries.filter((entry) => getDayKey(entry.timestamp) === selectedKey),
     [entries, selectedKey],
   );
 
-  const selectedAverage = useMemo(
-    () => weightedAverage(selectedEntries),
+  const todayEntries = useMemo(
+    () => entries.filter((entry) => getDayKey(entry.timestamp) === todayKey),
+    [entries, todayKey],
+  );
+
+  const selectedAverage = useMemo(() => weightedAverage(selectedEntries), [selectedEntries]);
+  const todayAverage = useMemo(() => weightedAverage(todayEntries), [todayEntries]);
+  const allTimeAverage = useMemo(() => weightedAverage(entries), [entries]);
+  const selectedTotals = useMemo(
+    () => sumNutrientsForEntries(selectedEntries),
     [selectedEntries],
   );
-  const allTimeAverage = useMemo(() => weightedAverage(entries), [entries]);
+  const todayTotals = useMemo(() => sumNutrientsForEntries(todayEntries), [todayEntries]);
+
+  const todayFeelAverage = useMemo(() => {
+    const ratings = todayEntries
+      .map((entry) => parseEntryMeta(entry.notes)?.feel_after ?? null)
+      .filter((value): value is number => typeof value === "number");
+    if (!ratings.length) return null;
+    const total = ratings.reduce((sum, rating) => sum + rating, 0);
+    return Number((total / ratings.length).toFixed(1));
+  }, [todayEntries]);
 
   const streak = useMemo(() => {
     if (!entries.length) return 0;
@@ -133,7 +463,7 @@ export default function Home() {
       const stats = dailyTotals.get(key);
       if (!stats) break;
       const avg = stats.weight ? Math.round(stats.total / stats.weight) : 0;
-      if (avg >= goalPercent) {
+      if (avg >= optimalGoal) {
         streakCount += 1;
         cursor.setDate(cursor.getDate() - 1);
       } else {
@@ -142,15 +472,37 @@ export default function Home() {
     }
 
     return streakCount;
-  }, [entries, goalPercent]);
+  }, [entries, optimalGoal]);
+
+  const selectedDateLabel = selectedDate.toLocaleDateString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+
+  const projectedTodayTotals = useMemo(() => {
+    if (!estimate) return todayTotals;
+    return addNutrients(todayTotals, estimate.nutrients);
+  }, [estimate, todayTotals]);
+
+  const selectedEntryRows = useMemo(
+    () =>
+      selectedEntries.map((entry) => ({
+        entry,
+        meta: parseEntryMeta(entry.notes),
+      })),
+    [selectedEntries],
+  );
 
   const resetDraft = () => {
     setDraft({
       mealText: "",
-      wholeFoodsPercent: 80,
+      optimalScore: optimalGoal,
       llmReason: "",
       sizeLabel: null,
       sizeWeight: null,
+      feelAfter: null,
+      meta: null,
     });
     setEstimate(null);
     setReadyToSave(false);
@@ -160,12 +512,31 @@ export default function Home() {
     setError(null);
     const mealText = draft.mealText.trim();
     if (!mealText) return;
+
+    const recentMeals = todayEntries.slice(0, 6).map((entry) => ({
+      meal_text: entry.mealText,
+      optimal_score: entry.wholeFoodsPercent,
+      feel_after: parseEntryMeta(entry.notes)?.feel_after ?? null,
+    }));
+
     setIsEstimating(true);
 
     const response = await fetch("/api/estimate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mealText }),
+      body: JSON.stringify({
+        mealText,
+        profile,
+        targets: { ...targets, optimal_goal: optimalGoal },
+        day_context: {
+          date: todayKey,
+          meal_count: todayEntries.length,
+          daily_optimal_average: todayAverage,
+          nutrients_consumed: todayTotals,
+          feel_average: todayFeelAverage,
+          recent_meals: recentMeals,
+        },
+      }),
     });
 
     setIsEstimating(false);
@@ -175,19 +546,28 @@ export default function Home() {
       const message =
         typeof payload.error === "string"
           ? payload.error
-          : "Could not estimate whole foods. Try again.";
+          : "Could not estimate this meal right now.";
       setError(message);
       return;
     }
 
-    const data = (await response.json()) as Estimate;
-    setEstimate(data);
+    const normalized = normalizeEstimate(await response.json());
+    setEstimate(normalized);
     setDraft((prev) => ({
       ...prev,
-      wholeFoodsPercent: data.percent ?? prev.wholeFoodsPercent,
-      llmReason: data.reason ?? "",
-      sizeLabel: data.size_label ?? null,
-      sizeWeight: data.size_weight ?? null,
+      optimalScore: normalized.optimal_score,
+      llmReason: normalized.summary,
+      sizeLabel: normalized.size_label,
+      sizeWeight: normalized.size_weight,
+      meta: {
+        version: 2,
+        feel_after: prev.feelAfter,
+        nutrients: normalized.nutrients,
+        positive: normalized.positive,
+        improve: normalized.improve,
+        recommendation: normalized.recommendation,
+        confidence: normalized.confidence,
+      },
     }));
     setReadyToSave(true);
   };
@@ -204,13 +584,23 @@ export default function Home() {
     const mealText = draft.mealText.trim();
     if (!mealText) return;
 
+    const meta: EntryMetaV2 = {
+      version: 2,
+      feel_after: draft.feelAfter,
+      nutrients: draft.meta?.nutrients ?? emptyNutrients(),
+      positive: draft.meta?.positive ?? [],
+      improve: draft.meta?.improve ?? [],
+      recommendation: draft.meta?.recommendation ?? "",
+      confidence: draft.meta?.confidence ?? "medium",
+    };
+
     const payload = {
       mealText,
       timestamp: new Date().toISOString(),
-      mood: "Neutral",
-      wholeFoodsPercent: draft.wholeFoodsPercent,
-      notes: null,
+      mood: draft.feelAfter ? `${draft.feelAfter}/5` : "Not rated",
+      wholeFoodsPercent: draft.optimalScore,
       llmReason: draft.llmReason,
+      notes: JSON.stringify(meta),
       sizeLabel: draft.sizeLabel,
       sizeWeight: draft.sizeWeight,
     };
@@ -235,6 +625,7 @@ export default function Home() {
       ...prev,
       mealText: value,
     }));
+
     if (readyToSave) {
       setReadyToSave(false);
       setEstimate(null);
@@ -243,6 +634,7 @@ export default function Home() {
         llmReason: "",
         sizeLabel: null,
         sizeWeight: null,
+        meta: null,
       }));
     }
   };
@@ -251,7 +643,7 @@ export default function Home() {
     await fetch("/api/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ goalPercent }),
+      body: JSON.stringify({ goalPercent: optimalGoal }),
     });
   };
 
@@ -272,29 +664,28 @@ export default function Home() {
     });
   };
 
-  const selectedDateLabel = selectedDate.toLocaleDateString([], {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
+  const recalcTargetsFromProfile = () => {
+    setTargets(computeDefaultTargets(profile));
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-cream via-white to-white px-4 py-6">
-      <main className="mx-auto flex w-full max-w-xl flex-col gap-6">
+      <main className="mx-auto flex w-full max-w-2xl flex-col gap-6">
         <header className="space-y-2">
-          <p className="text-xs uppercase tracking-[0.35em] text-inkSoft">Daily Log</p>
-          <h1 className="font-display text-4xl text-ink">Food Tracker</h1>
+          <p className="text-xs uppercase tracking-[0.35em] text-inkSoft">Daily Nutrition</p>
+          <h1 className="font-display text-4xl text-ink">Optimal Tracker</h1>
+          <p className="text-sm text-inkSoft">
+            AI estimates are directional, not medical-grade measurements.
+          </p>
         </header>
 
         <section className="rounded-xl border border-line bg-white/70 px-3 py-3">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <div className="rounded-lg border border-line/70 bg-white/80 px-2 py-2">
               <p className="text-[10px] uppercase tracking-[0.25em] text-inkSoft/70">
-                Entries
+                Meals
               </p>
-              <p className="mt-1 text-xl font-semibold text-ink">
-                {selectedEntries.length}
-              </p>
+              <p className="mt-1 text-xl font-semibold text-ink">{selectedEntries.length}</p>
             </div>
             <div className="rounded-lg border border-line/70 bg-white/80 px-2 py-2">
               <p className="text-[10px] uppercase tracking-[0.25em] text-inkSoft/70">
@@ -305,7 +696,7 @@ export default function Home() {
             <div className="rounded-lg border border-line/70 bg-white/80 px-2 py-2">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-[10px] uppercase tracking-[0.25em] text-inkSoft/70">
-                  Day %
+                  Day Optimal
                 </p>
                 <div className="flex items-center gap-1 text-[10px] text-inkSoft/70">
                   <span>Goal</span>
@@ -313,9 +704,11 @@ export default function Home() {
                     type="number"
                     min="0"
                     max="100"
-                    value={goalPercent}
+                    value={optimalGoal}
                     onChange={(event) =>
-                      setGoalPercent(Math.min(100, Math.max(0, Number(event.target.value) || 0)))
+                      setOptimalGoal(
+                        clamp(Math.round(toNumber(event.target.value, optimalGoal)), 0, 100),
+                      )
                     }
                     onBlur={handleGoalSave}
                     className="w-12 rounded-full border border-line bg-white px-2 py-0.5 text-right text-base"
@@ -323,14 +716,12 @@ export default function Home() {
                   <span>%</span>
                 </div>
               </div>
-              <p className="mt-1 text-xl font-semibold text-ink">
-                {selectedAverage}%
-              </p>
+              <p className="mt-1 text-xl font-semibold text-ink">{selectedAverage}%</p>
               <div className="mt-1 h-1.5 w-full rounded-full bg-line/40">
                 <div
                   className={clsx(
                     "h-1.5 rounded-full transition-colors",
-                    getStatusColor(selectedAverage, goalPercent),
+                    getStatusColor(selectedAverage, optimalGoal),
                   )}
                   style={{ width: `${Math.min(selectedAverage, 100)}%` }}
                 />
@@ -338,21 +729,169 @@ export default function Home() {
             </div>
             <div className="rounded-lg border border-line/70 bg-white/80 px-2 py-2">
               <p className="text-[10px] uppercase tracking-[0.25em] text-inkSoft/70">
-                All-time %
+                All-time
               </p>
               <p className="mt-1 text-xl font-semibold text-ink">{allTimeAverage}%</p>
               <div className="mt-1 h-1.5 w-full rounded-full bg-line/40">
                 <div
                   className={clsx(
                     "h-1.5 rounded-full transition-colors",
-                    getStatusColor(allTimeAverage, goalPercent),
+                    getStatusColor(allTimeAverage, optimalGoal),
                   )}
                   style={{ width: `${Math.min(allTimeAverage, 100)}%` }}
                 />
               </div>
             </div>
           </div>
+          <p className="mt-3 text-xs text-inkSoft">
+            Today average: {todayAverage}% optimal
+            {todayFeelAverage ? ` · Avg feel ${todayFeelAverage}/5` : ""}
+          </p>
         </section>
+
+        <details className="rounded-2xl border border-line bg-white/90 p-4 shadow-soft">
+          <summary className="cursor-pointer list-none">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-display text-2xl text-ink">Profile & Targets</h2>
+              <span className="text-xs uppercase tracking-[0.2em] text-inkSoft">Tap</span>
+            </div>
+          </summary>
+
+          <div className="mt-4 space-y-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-inkSoft">Profile</p>
+              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
+                <label className="flex flex-col gap-1 text-xs text-inkSoft">
+                  Age
+                  <input
+                    type="number"
+                    value={profile.age}
+                    min={13}
+                    max={100}
+                    onChange={(event) =>
+                      setProfile((prev) => ({
+                        ...prev,
+                        age: clamp(Math.round(toNumber(event.target.value, prev.age)), 13, 100),
+                      }))
+                    }
+                    className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-inkSoft">
+                  Height cm
+                  <input
+                    type="number"
+                    value={profile.heightCm}
+                    min={120}
+                    max={230}
+                    onChange={(event) =>
+                      setProfile((prev) => ({
+                        ...prev,
+                        heightCm: clamp(
+                          Math.round(toNumber(event.target.value, prev.heightCm)),
+                          120,
+                          230,
+                        ),
+                      }))
+                    }
+                    className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-inkSoft">
+                  Weight kg
+                  <input
+                    type="number"
+                    value={profile.weightKg}
+                    min={35}
+                    max={250}
+                    onChange={(event) =>
+                      setProfile((prev) => ({
+                        ...prev,
+                        weightKg: clamp(
+                          Math.round(toNumber(event.target.value, prev.weightKg)),
+                          35,
+                          250,
+                        ),
+                      }))
+                    }
+                    className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-inkSoft">
+                  Sex
+                  <select
+                    value={profile.sex}
+                    onChange={(event) =>
+                      setProfile((prev) => ({
+                        ...prev,
+                        sex: event.target.value as Sex,
+                      }))
+                    }
+                    className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+                  >
+                    <option value="female">Female</option>
+                    <option value="male">Male</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-inkSoft">
+                  Activity
+                  <select
+                    value={profile.activity}
+                    onChange={(event) =>
+                      setProfile((prev) => ({
+                        ...prev,
+                        activity: event.target.value as ActivityLevel,
+                      }))
+                    }
+                    className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+                  >
+                    <option value="low">Low</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs uppercase tracking-[0.2em] text-inkSoft">Daily Targets</p>
+                <button
+                  type="button"
+                  onClick={recalcTargetsFromProfile}
+                  className="rounded-full border border-line px-3 py-1 text-xs uppercase tracking-[0.2em] text-inkSoft"
+                >
+                  Auto-fill
+                </button>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
+                {NUTRIENT_KEYS.map((key) => (
+                  <label key={key} className="flex flex-col gap-1 text-xs text-inkSoft">
+                    {NUTRIENT_LABELS[key]} ({NUTRIENT_UNITS[key]})
+                    <input
+                      type="number"
+                      value={targets[key]}
+                      min={NUTRIENT_LIMITS[key].min}
+                      max={NUTRIENT_LIMITS[key].max}
+                      onChange={(event) =>
+                        setTargets((prev) => ({
+                          ...prev,
+                          [key]: clamp(
+                            toNumber(event.target.value, prev[key]),
+                            NUTRIENT_LIMITS[key].min,
+                            NUTRIENT_LIMITS[key].max,
+                          ),
+                        }))
+                      }
+                      className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        </details>
 
         <section className="rounded-2xl border border-line bg-white/90 p-4 shadow-soft">
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -367,38 +906,117 @@ export default function Home() {
                 className="min-h-[140px] rounded-2xl border border-line bg-white px-4 py-3 text-base text-ink"
               />
             </label>
+
+            <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.2em] text-inkSoft">
+              How did you feel after this meal?
+              <select
+                value={draft.feelAfter ?? ""}
+                onChange={(event) => {
+                  const value = event.target.value ? Number(event.target.value) : null;
+                  setDraft((prev) => ({
+                    ...prev,
+                    feelAfter: value && Number.isFinite(value) ? clamp(value, 1, 5) : null,
+                    meta: prev.meta
+                      ? {
+                          ...prev.meta,
+                          feel_after:
+                            value && Number.isFinite(value) ? clamp(value, 1, 5) : null,
+                        }
+                      : prev.meta,
+                  }));
+                }}
+                className="w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink"
+              >
+                <option value="">Not rated</option>
+                <option value="1">1 - Very bad</option>
+                <option value="2">2 - Low energy</option>
+                <option value="3">3 - Neutral</option>
+                <option value="4">4 - Pretty good</option>
+                <option value="5">5 - Great</option>
+              </select>
+            </label>
+
             <p className="text-xs text-inkSoft">
-              We&apos;ll estimate the whole foods % for you.
+              AI uses your profile, nutrient targets, and today&apos;s logged meals for tailored
+              recommendations.
             </p>
 
             {estimate ? (
               <div className="rounded-xl border border-line bg-white px-3 py-3 text-sm text-ink">
-                <p className="text-xs uppercase tracking-[0.2em] text-inkSoft">LLM Estimate</p>
-                <p className="mt-1 text-lg font-semibold text-ink">
-                  {draft.wholeFoodsPercent}% whole foods
-                </p>
-                <p className="mt-2 text-sm text-ink">{estimate.reason}</p>
-                <div className="mt-2 grid gap-2 text-xs text-inkSoft sm:grid-cols-2">
+                <p className="text-xs uppercase tracking-[0.2em] text-inkSoft">AI Insight</p>
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <p className="text-lg font-semibold text-ink">
+                    {estimate.optimal_score}% optimal
+                  </p>
+                  <span className="rounded-full border border-line px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-inkSoft">
+                    {estimate.confidence} confidence
+                  </span>
+                </div>
+                <p className="mt-2 text-sm text-ink">{estimate.summary}</p>
+
+                <div className="mt-3 grid gap-2 text-xs text-inkSoft sm:grid-cols-2">
                   <div>
-                    <p className="uppercase tracking-[0.2em]">Whole foods</p>
-                    <p className="text-sm text-ink">
-                      {estimate.whole_foods_items.length
-                        ? estimate.whole_foods_items.join(", ")
-                        : "-"}
+                    <p className="uppercase tracking-[0.2em]">Good</p>
+                    <p className="mt-1 text-sm text-ink">
+                      {estimate.positive.length ? estimate.positive.join(", ") : "-"}
                     </p>
                   </div>
                   <div>
-                    <p className="uppercase tracking-[0.2em]">Not whole</p>
-                    <p className="text-sm text-ink">
-                      {estimate.non_whole_foods_items.length
-                        ? estimate.non_whole_foods_items.join(", ")
-                        : "-"}
+                    <p className="uppercase tracking-[0.2em]">Improve</p>
+                    <p className="mt-1 text-sm text-ink">
+                      {estimate.improve.length ? estimate.improve.join(", ") : "-"}
                     </p>
                   </div>
                 </div>
-                <p className="mt-2 text-xs text-inkSoft">
-                  Meal size: {estimate.size_label} (weight {estimate.size_weight})
-                </p>
+
+                <div className="mt-3 rounded-lg border border-line/70 bg-cream/60 px-3 py-2">
+                  <p className="text-xs uppercase tracking-[0.2em] text-inkSoft">
+                    Next meal recommendation
+                  </p>
+                  <p className="mt-1 text-sm text-ink">
+                    {estimate.recommendation || "No recommendation returned."}
+                  </p>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                  {(["protein_g", "carbs_g", "fat_g", "fiber_g"] as const).map((key) => (
+                    <div key={key} className="rounded-lg border border-line/70 bg-white px-2 py-2">
+                      <p className="uppercase tracking-[0.15em] text-inkSoft/70">
+                        {NUTRIENT_LABELS[key]}
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-ink">
+                        {Math.round(estimate.nutrients[key])} {NUTRIENT_UNITS[key]}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                <details className="mt-3 rounded-lg border border-line/70 bg-white px-3 py-2">
+                  <summary className="cursor-pointer list-none text-xs uppercase tracking-[0.2em] text-inkSoft">
+                    Micronutrient estimate
+                  </summary>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+                    {(
+                      [
+                        "sodium_mg",
+                        "potassium_mg",
+                        "magnesium_mg",
+                        "calcium_mg",
+                        "iron_mg",
+                        "vitamin_c_mg",
+                      ] as const
+                    ).map((key) => (
+                      <div key={key} className="rounded-lg border border-line/70 bg-white px-2 py-2">
+                        <p className="uppercase tracking-[0.15em] text-inkSoft/70">
+                          {NUTRIENT_LABELS[key]}
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-ink">
+                          {Math.round(estimate.nutrients[key])} {NUTRIENT_UNITS[key]}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </details>
               </div>
             ) : null}
 
@@ -415,11 +1033,7 @@ export default function Home() {
                     : "bg-ink hover:bg-ink/90",
                 )}
               >
-                {isEstimating
-                  ? "Estimating..."
-                  : readyToSave
-                  ? "Save entry"
-                  : "Estimate whole foods"}
+                {isEstimating ? "Analyzing..." : readyToSave ? "Save meal" : "Analyze meal"}
               </button>
               {readyToSave ? (
                 <button
@@ -439,6 +1053,60 @@ export default function Home() {
               </button>
             </div>
           </form>
+        </section>
+
+        <section className="rounded-2xl border border-line bg-white/90 p-4 shadow-soft">
+          <h2 className="font-display text-2xl text-ink">Daily Coverage</h2>
+          <p className="mt-1 text-xs text-inkSoft">
+            {selectedDateLabel}
+            {isToday ? " · Today" : ""}
+            {estimate ? " · projected with current draft meal" : ""}
+          </p>
+
+          <div className="mt-4 grid gap-2">
+            {(
+              [
+                "protein_g",
+                "carbs_g",
+                "fat_g",
+                "fiber_g",
+                "potassium_mg",
+                "magnesium_mg",
+                "sodium_mg",
+              ] as const
+            ).map((key) => {
+              const isUpperBound = key === "sodium_mg";
+              const actual = (isToday && estimate ? projectedTodayTotals : selectedTotals)[key];
+              const target = targets[key];
+              const coverage = getCoveragePercent(actual, target, isUpperBound);
+              const color =
+                coverage >= 90
+                  ? "bg-emerald-500"
+                  : coverage >= 70
+                    ? "bg-amber-400"
+                    : "bg-rose-500";
+
+              return (
+                <div key={key} className="rounded-lg border border-line/70 bg-white px-3 py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs uppercase tracking-[0.2em] text-inkSoft">
+                      {NUTRIENT_LABELS[key]}
+                    </p>
+                    <p className="text-xs text-inkSoft">
+                      {Math.round(actual)} / {Math.round(target)} {NUTRIENT_UNITS[key]}
+                      {isUpperBound ? " max" : ""}
+                    </p>
+                  </div>
+                  <div className="mt-2 h-1.5 w-full rounded-full bg-line/30">
+                    <div
+                      className={clsx("h-1.5 rounded-full transition-colors", color)}
+                      style={{ width: `${Math.min(coverage, 100)}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </section>
 
         <section className="rounded-2xl border border-line bg-white/90 p-4 shadow-soft">
@@ -480,28 +1148,37 @@ export default function Home() {
           </div>
 
           <div className="mt-4 space-y-3">
-            {selectedEntries.length === 0 ? (
+            {selectedEntryRows.length === 0 ? (
               <p className="text-sm text-inkSoft">No entries yet.</p>
             ) : (
-              selectedEntries.map((entry) => (
-                <div
-                  key={entry.id}
-                  className="rounded-xl border border-line bg-white px-3 py-3"
-                >
+              selectedEntryRows.map(({ entry, meta }) => (
+                <div key={entry.id} className="rounded-xl border border-line bg-white px-3 py-3">
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-sm font-semibold text-ink">
-                          {entry.mealText}
-                        </p>
-                        <p className="text-xs text-inkSoft">
-                          {formatDisplayTime(entry.timestamp)}
-                        </p>
+                        <p className="text-sm font-semibold text-ink">{entry.mealText}</p>
+                        <p className="text-xs text-inkSoft">{formatDisplayTime(entry.timestamp)}</p>
                       </div>
                       <span className="text-sm font-semibold text-accentDeep">
-                        {entry.wholeFoodsPercent}%
+                        {entry.wholeFoodsPercent}% optimal
                       </span>
                     </div>
+                    <p className="text-sm text-ink">{entry.llmReason}</p>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-inkSoft">
+                      <span className="rounded-full border border-line px-2 py-0.5">
+                        Feel: {formatFeelLabel(meta?.feel_after ?? null)}
+                      </span>
+                      {meta?.confidence ? (
+                        <span className="rounded-full border border-line px-2 py-0.5">
+                          Confidence: {meta.confidence}
+                        </span>
+                      ) : null}
+                    </div>
+                    {meta?.recommendation ? (
+                      <p className="rounded-lg border border-line/70 bg-cream/50 px-2 py-2 text-xs text-ink">
+                        Next meal: {meta.recommendation}
+                      </p>
+                    ) : null}
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
@@ -519,7 +1196,7 @@ export default function Home() {
         </section>
 
         <footer className="pb-6 text-center text-[10px] uppercase tracking-[0.35em] text-inkSoft/70">
-          v7
+          v8
         </footer>
       </main>
     </div>

@@ -3,6 +3,19 @@ import { GoogleGenAI } from "@google/genai";
 
 export const runtime = "nodejs";
 
+type NutrientTotals = {
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  fiber_g: number;
+  sodium_mg: number;
+  potassium_mg: number;
+  magnesium_mg: number;
+  calcium_mg: number;
+  iron_mg: number;
+  vitamin_c_mg: number;
+};
+
 const MODEL_CANDIDATES = [
   "gemini-2.0-flash-001",
   "gemini-2.0-flash",
@@ -11,12 +24,99 @@ const MODEL_CANDIDATES = [
   "gemini-1.5-pro",
   "gemini-1.0-pro",
   "gemini-pro",
-  "text-bison-001",
-  "chat-bison-001",
 ];
+
+const NUTRIENT_KEYS: Array<keyof NutrientTotals> = [
+  "protein_g",
+  "carbs_g",
+  "fat_g",
+  "fiber_g",
+  "sodium_mg",
+  "potassium_mg",
+  "magnesium_mg",
+  "calcium_mg",
+  "iron_mg",
+  "vitamin_c_mg",
+];
+
+const NUTRIENT_LIMITS: Record<keyof NutrientTotals, { min: number; max: number }> = {
+  protein_g: { min: 0, max: 400 },
+  carbs_g: { min: 0, max: 800 },
+  fat_g: { min: 0, max: 300 },
+  fiber_g: { min: 0, max: 120 },
+  sodium_mg: { min: 0, max: 12000 },
+  potassium_mg: { min: 0, max: 10000 },
+  magnesium_mg: { min: 0, max: 2000 },
+  calcium_mg: { min: 0, max: 3000 },
+  iron_mg: { min: 0, max: 100 },
+  vitamin_c_mg: { min: 0, max: 2000 },
+};
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
+
+const toNumber = (value: unknown, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const toRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+
+const sanitizeNutrients = (value: Record<string, unknown>): NutrientTotals => {
+  const nutrients = {} as NutrientTotals;
+  for (const key of NUTRIENT_KEYS) {
+    const limits = NUTRIENT_LIMITS[key];
+    nutrients[key] = clamp(toNumber(value[key], 0), limits.min, limits.max);
+  }
+  return nutrients;
+};
+
+const normalizeStringList = (value: unknown, max = 4) =>
+  Array.isArray(value)
+    ? value.map(String).map((item) => item.trim()).filter(Boolean).slice(0, max)
+    : [];
+
+const parseJsonFromText = (text: string) => {
+  const trimmed = text.trim();
+  if (!trimmed) return {};
+
+  try {
+    return JSON.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    const withoutCodeFence = trimmed
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/```$/, "")
+      .trim();
+    try {
+      return JSON.parse(withoutCodeFence) as Record<string, unknown>;
+    } catch {
+      const match = withoutCodeFence.match(/\{[\s\S]*\}/);
+      if (!match) return {};
+      return JSON.parse(match[0]) as Record<string, unknown>;
+    }
+  }
+};
+
+const sizeWeightDefault: Record<string, number> = {
+  small: 0.7,
+  medium: 1.0,
+  large: 1.3,
+  "very large": 1.6,
+};
+
+const normalizeSizeLabel = (value: unknown) => {
+  const raw = String(value ?? "").toLowerCase().trim();
+  if (raw in sizeWeightDefault) return raw;
+  return "medium";
+};
+
+const normalizeConfidence = (value: unknown) => {
+  const raw = String(value ?? "").toLowerCase().trim();
+  if (raw === "low" || raw === "high") return raw;
+  return "medium";
+};
 
 export async function POST(request: Request) {
   if (!process.env.GEMINI_API_KEY) {
@@ -27,27 +127,111 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json().catch(() => ({}));
-  const mealText = typeof body.mealText === "string" ? body.mealText.trim() : "";
+  const payload = toRecord(body);
+  const mealText = typeof payload.mealText === "string" ? payload.mealText.trim() : "";
 
   if (!mealText) {
     return NextResponse.json({ error: "Meal text is required." }, { status: 400 });
   }
 
-  const prompt = `You are a nutrition assistant. Estimate how much of a meal counts as whole foods.
+  const profile = toRecord(payload.profile);
+  const targets = toRecord(payload.targets);
+  const dayContext = toRecord(payload.day_context);
 
-Definition: Whole foods are minimally processed, mostly single-ingredient foods (fruit, vegetables, eggs, plain meat, beans, plain oats, nuts). Processed foods (chips, candy, soda, refined desserts) count as 0. Mixed foods (sandwich, pizza, cereal, burrito) should be estimated by component proportions. Be conservative.
+  const normalizedProfile = {
+    age: clamp(Math.round(toNumber(profile.age, 30)), 13, 100),
+    height_cm: clamp(Math.round(toNumber(profile.heightCm, 170)), 120, 230),
+    weight_kg: clamp(Math.round(toNumber(profile.weightKg, 75)), 35, 250),
+    sex:
+      profile.sex === "female" || profile.sex === "male" || profile.sex === "other"
+        ? profile.sex
+        : "other",
+    activity:
+      profile.activity === "low" ||
+      profile.activity === "moderate" ||
+      profile.activity === "high"
+        ? profile.activity
+        : "moderate",
+  };
 
-Also estimate meal size based on the description and map it to a numeric weight:
-- small = 0.7
-- medium = 1.0
-- large = 1.3
-- very large = 1.6
+  const normalizedTargets = sanitizeNutrients(targets);
+  const normalizedConsumed = sanitizeNutrients(toRecord(dayContext.nutrients_consumed));
+  const optimalGoal = clamp(Math.round(toNumber(targets.optimal_goal, 80)), 50, 100);
+  const recentMeals = Array.isArray(dayContext.recent_meals)
+    ? dayContext.recent_meals
+        .map((item) => toRecord(item))
+        .map((item) => ({
+          meal_text: typeof item.meal_text === "string" ? item.meal_text.trim() : "",
+          optimal_score: clamp(Math.round(toNumber(item.optimal_score, 0)), 0, 100),
+          feel_after:
+            item.feel_after === null
+              ? null
+              : clamp(Math.round(toNumber(item.feel_after, 0)), 0, 5),
+        }))
+        .filter((item) => item.meal_text)
+        .slice(0, 8)
+    : [];
 
-Return strict JSON with keys:
-percent (0-100 integer), reason (one sentence), whole_foods_items (array), non_whole_foods_items (array), size_label (small/medium/large/very large), size_weight (number).
+  const normalizedContext = {
+    date: typeof dayContext.date === "string" ? dayContext.date : "",
+    meal_count: clamp(Math.round(toNumber(dayContext.meal_count, 0)), 0, 50),
+    daily_optimal_average: clamp(
+      Math.round(toNumber(dayContext.daily_optimal_average, 0)),
+      0,
+      100,
+    ),
+    feel_average:
+      dayContext.feel_average === null ? null : clamp(toNumber(dayContext.feel_average, 0), 0, 5),
+    nutrients_consumed: normalizedConsumed,
+    recent_meals: recentMeals,
+  };
 
-Meal: "${mealText}"
-`;
+  const prompt = `You are a practical nutrition coach.
+
+Your task:
+Estimate this meal's nutrients and score how well it fits today's needs.
+
+Important:
+- Be directionally useful, not medically exact.
+- Use the user's profile, targets, and what they already ate today.
+- The recommendation must be tailored to today's gaps/excesses after this meal.
+- Keep wording clear and actionable.
+
+Return STRICT JSON only with this exact shape:
+{
+  "optimal_score": 0-100 integer,
+  "summary": "1-2 sentence explanation",
+  "positive": ["up to 3 short bullets"],
+  "improve": ["up to 3 short bullets"],
+  "nutrients": {
+    "protein_g": number,
+    "carbs_g": number,
+    "fat_g": number,
+    "fiber_g": number,
+    "sodium_mg": number,
+    "potassium_mg": number,
+    "magnesium_mg": number,
+    "calcium_mg": number,
+    "iron_mg": number,
+    "vitamin_c_mg": number
+  },
+  "recommendation": "specific next meal suggestion for this user today",
+  "size_label": "small | medium | large | very large",
+  "size_weight": number,
+  "confidence": "low | medium | high"
+}
+
+Context JSON:
+${JSON.stringify(
+  {
+    meal_text: mealText,
+    profile: normalizedProfile,
+    targets: { ...normalizedTargets, optimal_goal: optimalGoal },
+    day_context: normalizedContext,
+  },
+  null,
+  2,
+)}`;
 
   const ai = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY,
@@ -66,13 +250,13 @@ Meal: "${mealText}"
         });
         responseText = response.text ?? "";
         break;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         if (message.includes("404") || message.includes("NOT_FOUND")) {
-          lastError = err;
+          lastError = error;
           continue;
         }
-        throw err;
+        throw error;
       }
     }
 
@@ -80,37 +264,41 @@ Meal: "${mealText}"
       throw lastError ?? new Error("No available Gemini model for this API key.");
     }
 
-    const parsed = (() => {
-      try {
-        return JSON.parse(responseText);
-      } catch {
-        const match = responseText.match(/\{[\s\S]*\}/);
-        if (!match) return {};
-        return JSON.parse(match[0]);
-      }
-    })();
-
-    const percent = clamp(Number(parsed.percent) || 0, 0, 100);
-    const sizeWeight = clamp(Number(parsed.size_weight) || 1, 0.5, 2);
-    const sizeLabel = typeof parsed.size_label === "string" ? parsed.size_label : "medium";
+    const parsed = parseJsonFromText(responseText);
+    const nutrients = sanitizeNutrients(toRecord(parsed.nutrients));
+    const optimalScore = clamp(Math.round(toNumber(parsed.optimal_score, 0)), 0, 100);
+    const summary =
+      typeof parsed.summary === "string"
+        ? parsed.summary.trim()
+        : "Meal analyzed against your day targets.";
+    const positive = normalizeStringList(parsed.positive, 3);
+    const improve = normalizeStringList(parsed.improve, 3);
+    const recommendation =
+      typeof parsed.recommendation === "string" ? parsed.recommendation.trim() : "";
+    const sizeLabel = normalizeSizeLabel(parsed.size_label);
+    const sizeWeight = clamp(
+      toNumber(parsed.size_weight, sizeWeightDefault[sizeLabel]),
+      0.5,
+      2,
+    );
+    const confidence = normalizeConfidence(parsed.confidence);
 
     return NextResponse.json({
-      percent,
-      reason: typeof parsed.reason === "string" ? parsed.reason : "",
-      whole_foods_items: Array.isArray(parsed.whole_foods_items)
-        ? parsed.whole_foods_items.map(String)
-        : [],
-      non_whole_foods_items: Array.isArray(parsed.non_whole_foods_items)
-        ? parsed.non_whole_foods_items.map(String)
-        : [],
+      optimal_score: optimalScore,
+      summary,
+      positive,
+      improve,
+      nutrients,
+      recommendation,
       size_label: sizeLabel,
       size_weight: sizeWeight,
+      confidence,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     console.error("Gemini estimate failed:", message);
     return NextResponse.json(
-      { error: message || "Failed to estimate whole foods percent." },
+      { error: message || "Failed to estimate meal quality." },
       { status: 500 },
     );
   }
