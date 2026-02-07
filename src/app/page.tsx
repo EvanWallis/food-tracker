@@ -16,15 +16,15 @@ type MealEntry = {
 };
 
 type Sex = "female" | "male" | "other";
-type ActivityLevel = "low" | "moderate" | "high";
 type ConfidenceLevel = "low" | "medium" | "high";
 
 type NutritionProfile = {
   age: number;
-  heightCm: number;
-  weightKg: number;
+  heightFt: number;
+  heightIn: number;
+  weightLbs: number;
   sex: Sex;
-  activity: ActivityLevel;
+  avgSteps: number;
 };
 
 type NutrientTotals = {
@@ -129,10 +129,11 @@ const NUTRIENT_LIMITS: Record<keyof NutrientTotals, { min: number; max: number }
 
 const DEFAULT_PROFILE: NutritionProfile = {
   age: 34,
-  heightCm: 178,
-  weightKg: 82,
+  heightFt: 5,
+  heightIn: 10,
+  weightLbs: 180,
   sex: "male",
-  activity: "moderate",
+  avgSteps: 8000,
 };
 
 const clamp = (value: number, min: number, max: number) =>
@@ -141,6 +142,35 @@ const clamp = (value: number, min: number, max: number) =>
 const toNumber = (value: unknown, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const parseWholeInput = (raw: string, previous: number, min: number, max: number) => {
+  const trimmed = raw.trim();
+  if (trimmed === "") return previous;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) return previous;
+  return clamp(Math.round(parsed), min, max);
+};
+
+const lbsToKg = (lbs: number) => lbs * 0.45359237;
+const kgToLbs = (kg: number) => kg * 2.20462262;
+const feetInchesToCm = (feet: number, inches: number) => (feet * 12 + inches) * 2.54;
+const cmToFeetInches = (cm: number) => {
+  const totalInches = cm / 2.54;
+  let feet = Math.floor(totalInches / 12);
+  let inches = Math.round(totalInches - feet * 12);
+  if (inches === 12) {
+    feet += 1;
+    inches = 0;
+  }
+  return { feet, inches };
+};
+
+const activityToSteps = (value: unknown) => {
+  if (value === "low") return 5000;
+  if (value === "high") return 12000;
+  if (value === "moderate") return 8000;
+  return 8000;
 };
 
 const emptyNutrients = (): NutrientTotals => ({
@@ -177,11 +207,12 @@ const addNutrients = (a: NutrientTotals, b: NutrientTotals): NutrientTotals => {
 };
 
 const computeDefaultTargets = (profile: NutritionProfile): NutrientTotals => {
-  const protein = clamp(Math.round(profile.weightKg * 1.6), 80, 220);
-  const fat = clamp(Math.round(profile.weightKg * 0.8), 45, 120);
+  const weightKg = lbsToKg(profile.weightLbs);
+  const protein = clamp(Math.round(weightKg * 1.6), 80, 220);
+  const fat = clamp(Math.round(weightKg * 0.8), 45, 120);
   const carbsMultiplier =
-    profile.activity === "high" ? 3.1 : profile.activity === "moderate" ? 2.4 : 1.8;
-  const carbs = clamp(Math.round(profile.weightKg * carbsMultiplier), 120, 420);
+    profile.avgSteps >= 12000 ? 3.1 : profile.avgSteps >= 7000 ? 2.4 : 1.8;
+  const carbs = clamp(Math.round(weightKg * carbsMultiplier), 120, 420);
   const fiber = profile.sex === "male" ? 38 : profile.sex === "female" ? 28 : 33;
   const iron = profile.sex === "female" ? 18 : 11;
 
@@ -299,16 +330,6 @@ const sumNutrientsForEntries = (entries: MealEntry[]) =>
     return addNutrients(acc, meta.nutrients);
   }, emptyNutrients());
 
-const getCoveragePercent = (actual: number, target: number, upperBound = false) => {
-  if (!target) return 0;
-  if (upperBound) {
-    if (actual <= target) return 100;
-    const over = ((actual - target) / target) * 100;
-    return clamp(Math.round(100 - over), 0, 100);
-  }
-  return clamp(Math.round((actual / target) * 100), 0, 140);
-};
-
 const formatFeelLabel = (value: number | null) => {
   if (!value) return "Not rated";
   if (value <= 2) return `${value}/5 (low energy)`;
@@ -364,29 +385,42 @@ export default function Home() {
     try {
       const profileRaw = window.localStorage.getItem(PROFILE_STORAGE_KEY);
       if (profileRaw) {
-        const parsed = JSON.parse(profileRaw) as Partial<NutritionProfile>;
+        const parsed = JSON.parse(profileRaw) as Record<string, unknown>;
+        const legacyHeightCm = clamp(
+          Math.round(toNumber(parsed.heightCm, feetInchesToCm(5, 10))),
+          120,
+          230,
+        );
+        const legacyFeetInches = cmToFeetInches(legacyHeightCm);
+        const legacyWeightKg = clamp(toNumber(parsed.weightKg, lbsToKg(180)), 35, 250);
         setProfile({
           age: clamp(Math.round(toNumber(parsed.age, DEFAULT_PROFILE.age)), 13, 100),
-          heightCm: clamp(
-            Math.round(toNumber(parsed.heightCm, DEFAULT_PROFILE.heightCm)),
-            120,
-            230,
+          heightFt: clamp(
+            Math.round(toNumber(parsed.heightFt, legacyFeetInches.feet)),
+            3,
+            8,
           ),
-          weightKg: clamp(
-            Math.round(toNumber(parsed.weightKg, DEFAULT_PROFILE.weightKg)),
-            35,
-            250,
+          heightIn: clamp(
+            Math.round(toNumber(parsed.heightIn, legacyFeetInches.inches)),
+            0,
+            11,
+          ),
+          weightLbs: clamp(
+            Math.round(toNumber(parsed.weightLbs, kgToLbs(legacyWeightKg))),
+            80,
+            550,
           ),
           sex:
             parsed.sex === "female" || parsed.sex === "male" || parsed.sex === "other"
               ? parsed.sex
               : DEFAULT_PROFILE.sex,
-          activity:
-            parsed.activity === "low" ||
-            parsed.activity === "moderate" ||
-            parsed.activity === "high"
-              ? parsed.activity
-              : DEFAULT_PROFILE.activity,
+          avgSteps: clamp(
+            Math.round(
+              toNumber(parsed.avgSteps, activityToSteps(parsed.activity)),
+            ),
+            1000,
+            40000,
+          ),
         });
       }
 
@@ -427,11 +461,6 @@ export default function Home() {
 
   const selectedAverage = useMemo(() => weightedAverage(selectedEntries), [selectedEntries]);
   const todayAverage = useMemo(() => weightedAverage(todayEntries), [todayEntries]);
-  const allTimeAverage = useMemo(() => weightedAverage(entries), [entries]);
-  const selectedTotals = useMemo(
-    () => sumNutrientsForEntries(selectedEntries),
-    [selectedEntries],
-  );
   const todayTotals = useMemo(() => sumNutrientsForEntries(todayEntries), [todayEntries]);
 
   const todayFeelAverage = useMemo(() => {
@@ -443,47 +472,11 @@ export default function Home() {
     return Number((total / ratings.length).toFixed(1));
   }, [todayEntries]);
 
-  const streak = useMemo(() => {
-    if (!entries.length) return 0;
-    const dailyTotals = new Map<string, { total: number; weight: number }>();
-
-    entries.forEach((entry) => {
-      const key = getDayKey(entry.timestamp);
-      const weight = entry.sizeWeight ?? 1;
-      const current = dailyTotals.get(key) ?? { total: 0, weight: 0 };
-      current.total += entry.wholeFoodsPercent * weight;
-      current.weight += weight;
-      dailyTotals.set(key, current);
-    });
-
-    let streakCount = 0;
-    const cursor = new Date();
-    while (true) {
-      const key = getDayKey(cursor);
-      const stats = dailyTotals.get(key);
-      if (!stats) break;
-      const avg = stats.weight ? Math.round(stats.total / stats.weight) : 0;
-      if (avg >= optimalGoal) {
-        streakCount += 1;
-        cursor.setDate(cursor.getDate() - 1);
-      } else {
-        break;
-      }
-    }
-
-    return streakCount;
-  }, [entries, optimalGoal]);
-
   const selectedDateLabel = selectedDate.toLocaleDateString([], {
     weekday: "short",
     month: "short",
     day: "numeric",
   });
-
-  const projectedTodayTotals = useMemo(() => {
-    if (!estimate) return todayTotals;
-    return addNutrients(todayTotals, estimate.nutrients);
-  }, [estimate, todayTotals]);
 
   const selectedEntryRows = useMemo(
     () =>
@@ -526,7 +519,14 @@ export default function Home() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         mealText,
-        profile,
+        profile: {
+          age: profile.age,
+          sex: profile.sex,
+          height_ft: profile.heightFt,
+          height_in: profile.heightIn,
+          weight_lbs: profile.weightLbs,
+          average_steps_day: profile.avgSteps,
+        },
         targets: { ...targets, optimal_goal: optimalGoal },
         day_context: {
           date: todayKey,
@@ -535,6 +535,10 @@ export default function Home() {
           nutrients_consumed: todayTotals,
           feel_average: todayFeelAverage,
           recent_meals: recentMeals,
+        },
+        recommendation_preferences: {
+          simple: true,
+          low_cook_time: true,
         },
       }),
     });
@@ -668,6 +672,160 @@ export default function Home() {
     setTargets(computeDefaultTargets(profile));
   };
 
+  const profileTargetsSection = (
+    <details className="rounded-2xl border border-line bg-white/90 p-4 shadow-soft">
+      <summary className="cursor-pointer list-none">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-display text-2xl text-ink">Profile & Targets</h2>
+          <span className="text-xs uppercase tracking-[0.2em] text-inkSoft">Tap</span>
+        </div>
+      </summary>
+
+      <div className="mt-4 space-y-4">
+        <div>
+          <p className="text-xs uppercase tracking-[0.2em] text-inkSoft">Profile</p>
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <label className="flex flex-col gap-1 text-xs text-inkSoft">
+              Age
+              <input
+                type="number"
+                value={profile.age}
+                min={13}
+                max={100}
+                onChange={(event) =>
+                  setProfile((prev) => ({
+                    ...prev,
+                    age: parseWholeInput(event.target.value, prev.age, 13, 100),
+                  }))
+                }
+                className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-inkSoft">
+              Height (ft)
+              <input
+                type="number"
+                value={profile.heightFt}
+                min={3}
+                max={8}
+                onChange={(event) =>
+                  setProfile((prev) => ({
+                    ...prev,
+                    heightFt: parseWholeInput(event.target.value, prev.heightFt, 3, 8),
+                  }))
+                }
+                className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-inkSoft">
+              Height (in)
+              <input
+                type="number"
+                value={profile.heightIn}
+                min={0}
+                max={11}
+                onChange={(event) =>
+                  setProfile((prev) => ({
+                    ...prev,
+                    heightIn: parseWholeInput(event.target.value, prev.heightIn, 0, 11),
+                  }))
+                }
+                className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-inkSoft">
+              Weight (lbs)
+              <input
+                type="number"
+                value={profile.weightLbs}
+                min={80}
+                max={550}
+                onChange={(event) =>
+                  setProfile((prev) => ({
+                    ...prev,
+                    weightLbs: parseWholeInput(event.target.value, prev.weightLbs, 80, 550),
+                  }))
+                }
+                className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-inkSoft">
+              Sex
+              <select
+                value={profile.sex}
+                onChange={(event) =>
+                  setProfile((prev) => ({
+                    ...prev,
+                    sex: event.target.value as Sex,
+                  }))
+                }
+                className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+              >
+                <option value="female">Female</option>
+                <option value="male">Male</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-inkSoft">
+              Avg steps/day
+              <input
+                type="number"
+                value={profile.avgSteps}
+                min={1000}
+                max={40000}
+                step={100}
+                onChange={(event) =>
+                  setProfile((prev) => ({
+                    ...prev,
+                    avgSteps: parseWholeInput(event.target.value, prev.avgSteps, 1000, 40000),
+                  }))
+                }
+                className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+              />
+            </label>
+          </div>
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs uppercase tracking-[0.2em] text-inkSoft">Daily Targets</p>
+            <button
+              type="button"
+              onClick={recalcTargetsFromProfile}
+              className="rounded-full border border-line px-3 py-1 text-xs uppercase tracking-[0.2em] text-inkSoft"
+            >
+              Auto-fill
+            </button>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
+            {NUTRIENT_KEYS.map((key) => (
+              <label key={key} className="flex flex-col gap-1 text-xs text-inkSoft">
+                {NUTRIENT_LABELS[key]} ({NUTRIENT_UNITS[key]})
+                <input
+                  type="number"
+                  value={targets[key]}
+                  min={NUTRIENT_LIMITS[key].min}
+                  max={NUTRIENT_LIMITS[key].max}
+                  onChange={(event) =>
+                    setTargets((prev) => ({
+                      ...prev,
+                      [key]: clamp(
+                        toNumber(event.target.value, prev[key]),
+                        NUTRIENT_LIMITS[key].min,
+                        NUTRIENT_LIMITS[key].max,
+                      ),
+                    }))
+                  }
+                  className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+      </div>
+    </details>
+  );
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-cream via-white to-white px-4 py-6">
       <main className="mx-auto flex w-full max-w-2xl flex-col gap-6">
@@ -680,18 +838,12 @@ export default function Home() {
         </header>
 
         <section className="rounded-xl border border-line bg-white/70 px-3 py-3">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <div className="rounded-lg border border-line/70 bg-white/80 px-2 py-2">
               <p className="text-[10px] uppercase tracking-[0.25em] text-inkSoft/70">
                 Meals
               </p>
               <p className="mt-1 text-xl font-semibold text-ink">{selectedEntries.length}</p>
-            </div>
-            <div className="rounded-lg border border-line/70 bg-white/80 px-2 py-2">
-              <p className="text-[10px] uppercase tracking-[0.25em] text-inkSoft/70">
-                Streak
-              </p>
-              <p className="mt-1 text-xl font-semibold text-ink">{streak}</p>
             </div>
             <div className="rounded-lg border border-line/70 bg-white/80 px-2 py-2">
               <div className="flex items-center justify-between gap-2">
@@ -729,18 +881,11 @@ export default function Home() {
             </div>
             <div className="rounded-lg border border-line/70 bg-white/80 px-2 py-2">
               <p className="text-[10px] uppercase tracking-[0.25em] text-inkSoft/70">
-                All-time
+                Average feel
               </p>
-              <p className="mt-1 text-xl font-semibold text-ink">{allTimeAverage}%</p>
-              <div className="mt-1 h-1.5 w-full rounded-full bg-line/40">
-                <div
-                  className={clsx(
-                    "h-1.5 rounded-full transition-colors",
-                    getStatusColor(allTimeAverage, optimalGoal),
-                  )}
-                  style={{ width: `${Math.min(allTimeAverage, 100)}%` }}
-                />
-              </div>
+              <p className="mt-1 text-xl font-semibold text-ink">
+                {todayFeelAverage ? `${todayFeelAverage}/5` : "--"}
+              </p>
             </div>
           </div>
           <p className="mt-3 text-xs text-inkSoft">
@@ -748,150 +893,6 @@ export default function Home() {
             {todayFeelAverage ? ` · Avg feel ${todayFeelAverage}/5` : ""}
           </p>
         </section>
-
-        <details className="rounded-2xl border border-line bg-white/90 p-4 shadow-soft">
-          <summary className="cursor-pointer list-none">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="font-display text-2xl text-ink">Profile & Targets</h2>
-              <span className="text-xs uppercase tracking-[0.2em] text-inkSoft">Tap</span>
-            </div>
-          </summary>
-
-          <div className="mt-4 space-y-4">
-            <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-inkSoft">Profile</p>
-              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
-                <label className="flex flex-col gap-1 text-xs text-inkSoft">
-                  Age
-                  <input
-                    type="number"
-                    value={profile.age}
-                    min={13}
-                    max={100}
-                    onChange={(event) =>
-                      setProfile((prev) => ({
-                        ...prev,
-                        age: clamp(Math.round(toNumber(event.target.value, prev.age)), 13, 100),
-                      }))
-                    }
-                    className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
-                  />
-                </label>
-                <label className="flex flex-col gap-1 text-xs text-inkSoft">
-                  Height cm
-                  <input
-                    type="number"
-                    value={profile.heightCm}
-                    min={120}
-                    max={230}
-                    onChange={(event) =>
-                      setProfile((prev) => ({
-                        ...prev,
-                        heightCm: clamp(
-                          Math.round(toNumber(event.target.value, prev.heightCm)),
-                          120,
-                          230,
-                        ),
-                      }))
-                    }
-                    className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
-                  />
-                </label>
-                <label className="flex flex-col gap-1 text-xs text-inkSoft">
-                  Weight kg
-                  <input
-                    type="number"
-                    value={profile.weightKg}
-                    min={35}
-                    max={250}
-                    onChange={(event) =>
-                      setProfile((prev) => ({
-                        ...prev,
-                        weightKg: clamp(
-                          Math.round(toNumber(event.target.value, prev.weightKg)),
-                          35,
-                          250,
-                        ),
-                      }))
-                    }
-                    className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
-                  />
-                </label>
-                <label className="flex flex-col gap-1 text-xs text-inkSoft">
-                  Sex
-                  <select
-                    value={profile.sex}
-                    onChange={(event) =>
-                      setProfile((prev) => ({
-                        ...prev,
-                        sex: event.target.value as Sex,
-                      }))
-                    }
-                    className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
-                  >
-                    <option value="female">Female</option>
-                    <option value="male">Male</option>
-                    <option value="other">Other</option>
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1 text-xs text-inkSoft">
-                  Activity
-                  <select
-                    value={profile.activity}
-                    onChange={(event) =>
-                      setProfile((prev) => ({
-                        ...prev,
-                        activity: event.target.value as ActivityLevel,
-                      }))
-                    }
-                    className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
-                  >
-                    <option value="low">Low</option>
-                    <option value="moderate">Moderate</option>
-                    <option value="high">High</option>
-                  </select>
-                </label>
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-xs uppercase tracking-[0.2em] text-inkSoft">Daily Targets</p>
-                <button
-                  type="button"
-                  onClick={recalcTargetsFromProfile}
-                  className="rounded-full border border-line px-3 py-1 text-xs uppercase tracking-[0.2em] text-inkSoft"
-                >
-                  Auto-fill
-                </button>
-              </div>
-              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
-                {NUTRIENT_KEYS.map((key) => (
-                  <label key={key} className="flex flex-col gap-1 text-xs text-inkSoft">
-                    {NUTRIENT_LABELS[key]} ({NUTRIENT_UNITS[key]})
-                    <input
-                      type="number"
-                      value={targets[key]}
-                      min={NUTRIENT_LIMITS[key].min}
-                      max={NUTRIENT_LIMITS[key].max}
-                      onChange={(event) =>
-                        setTargets((prev) => ({
-                          ...prev,
-                          [key]: clamp(
-                            toNumber(event.target.value, prev[key]),
-                            NUTRIENT_LIMITS[key].min,
-                            NUTRIENT_LIMITS[key].max,
-                          ),
-                        }))
-                      }
-                      className="rounded-lg border border-line bg-white px-2 py-2 text-sm text-ink"
-                    />
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-        </details>
 
         <section className="rounded-2xl border border-line bg-white/90 p-4 shadow-soft">
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -938,7 +939,7 @@ export default function Home() {
 
             <p className="text-xs text-inkSoft">
               AI uses your profile, nutrient targets, and today&apos;s logged meals for tailored
-              recommendations.
+              recommendations (defaulting to simple, low-cook next meals).
             </p>
 
             {estimate ? (
@@ -1056,60 +1057,6 @@ export default function Home() {
         </section>
 
         <section className="rounded-2xl border border-line bg-white/90 p-4 shadow-soft">
-          <h2 className="font-display text-2xl text-ink">Daily Coverage</h2>
-          <p className="mt-1 text-xs text-inkSoft">
-            {selectedDateLabel}
-            {isToday ? " · Today" : ""}
-            {estimate ? " · projected with current draft meal" : ""}
-          </p>
-
-          <div className="mt-4 grid gap-2">
-            {(
-              [
-                "protein_g",
-                "carbs_g",
-                "fat_g",
-                "fiber_g",
-                "potassium_mg",
-                "magnesium_mg",
-                "sodium_mg",
-              ] as const
-            ).map((key) => {
-              const isUpperBound = key === "sodium_mg";
-              const actual = (isToday && estimate ? projectedTodayTotals : selectedTotals)[key];
-              const target = targets[key];
-              const coverage = getCoveragePercent(actual, target, isUpperBound);
-              const color =
-                coverage >= 90
-                  ? "bg-emerald-500"
-                  : coverage >= 70
-                    ? "bg-amber-400"
-                    : "bg-rose-500";
-
-              return (
-                <div key={key} className="rounded-lg border border-line/70 bg-white px-3 py-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs uppercase tracking-[0.2em] text-inkSoft">
-                      {NUTRIENT_LABELS[key]}
-                    </p>
-                    <p className="text-xs text-inkSoft">
-                      {Math.round(actual)} / {Math.round(target)} {NUTRIENT_UNITS[key]}
-                      {isUpperBound ? " max" : ""}
-                    </p>
-                  </div>
-                  <div className="mt-2 h-1.5 w-full rounded-full bg-line/30">
-                    <div
-                      className={clsx("h-1.5 rounded-full transition-colors", color)}
-                      style={{ width: `${Math.min(coverage, 100)}%` }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-line bg-white/90 p-4 shadow-soft">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="font-display text-2xl text-ink">Entries</h2>
@@ -1194,6 +1141,8 @@ export default function Home() {
             )}
           </div>
         </section>
+
+        {profileTargetsSection}
 
         <footer className="pb-6 text-center text-[10px] uppercase tracking-[0.35em] text-inkSoft/70">
           v8

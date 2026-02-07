@@ -137,21 +137,38 @@ export async function POST(request: Request) {
   const profile = toRecord(payload.profile);
   const targets = toRecord(payload.targets);
   const dayContext = toRecord(payload.day_context);
+  const recommendationPreferences = toRecord(payload.recommendation_preferences);
+
+  const heightCmFromImperial = (() => {
+    const feet = clamp(Math.round(toNumber(profile.height_ft ?? profile.heightFt, 5)), 3, 8);
+    const inches = clamp(Math.round(toNumber(profile.height_in ?? profile.heightIn, 8)), 0, 11);
+    return Math.round((feet * 12 + inches) * 2.54);
+  })();
+  const weightKgFromImperial = toNumber(profile.weight_lbs ?? profile.weightLbs, 180) * 0.45359237;
+  const avgStepsDay = clamp(
+    Math.round(toNumber(profile.average_steps_day ?? profile.avgSteps, 8000)),
+    1000,
+    40000,
+  );
 
   const normalizedProfile = {
     age: clamp(Math.round(toNumber(profile.age, 30)), 13, 100),
-    height_cm: clamp(Math.round(toNumber(profile.heightCm, 170)), 120, 230),
-    weight_kg: clamp(Math.round(toNumber(profile.weightKg, 75)), 35, 250),
+    height_cm: clamp(
+      Math.round(toNumber(profile.height_cm ?? profile.heightCm, heightCmFromImperial)),
+      120,
+      230,
+    ),
+    weight_kg: clamp(
+      Number(toNumber(profile.weight_kg ?? profile.weightKg, weightKgFromImperial).toFixed(1)),
+      35,
+      250,
+    ),
+    average_steps_day: avgStepsDay,
     sex:
       profile.sex === "female" || profile.sex === "male" || profile.sex === "other"
         ? profile.sex
         : "other",
-    activity:
-      profile.activity === "low" ||
-      profile.activity === "moderate" ||
-      profile.activity === "high"
-        ? profile.activity
-        : "moderate",
+    activity_band: avgStepsDay >= 12000 ? "high" : avgStepsDay >= 7000 ? "moderate" : "low",
   };
 
   const normalizedTargets = sanitizeNutrients(targets);
@@ -196,6 +213,8 @@ Important:
 - Use the user's profile, targets, and what they already ate today.
 - The recommendation must be tailored to today's gaps/excesses after this meal.
 - Keep wording clear and actionable.
+- For recommendation, default to SIMPLE and LOW COOK TIME meals.
+- Prefer fast options: minimal ingredients, short prep, microwave/assembly/no-cook if possible.
 
 Return STRICT JSON only with this exact shape:
 {
@@ -228,6 +247,10 @@ ${JSON.stringify(
     profile: normalizedProfile,
     targets: { ...normalizedTargets, optimal_goal: optimalGoal },
     day_context: normalizedContext,
+    recommendation_preferences: {
+      simple: recommendationPreferences.simple !== false,
+      low_cook_time: recommendationPreferences.low_cook_time !== false,
+    },
   },
   null,
   2,
