@@ -183,6 +183,7 @@ export async function POST(request: Request) {
   const targets = toRecord(payload.targets);
   const dayContext = toRecord(payload.day_context);
   const recommendationPreferences = toRecord(payload.recommendation_preferences);
+  const groceryContext = toRecord(payload.grocery_context);
 
   const heightCmFromImperial = (() => {
     const feet = clamp(Math.round(toNumber(profile.height_ft ?? profile.heightFt, 5)), 3, 8);
@@ -233,6 +234,7 @@ export async function POST(request: Request) {
         .filter((item) => item.meal_text)
         .slice(0, 8)
     : [];
+  const queuedGroceryItems = normalizeStringList(groceryContext.queued_items, 20);
 
   const normalizedContext = {
     date: typeof dayContext.date === "string" ? dayContext.date : "",
@@ -246,6 +248,11 @@ export async function POST(request: Request) {
       dayContext.feel_average === null ? null : clamp(toNumber(dayContext.feel_average, 0), 0, 5),
     nutrients_consumed: normalizedConsumed,
     recent_meals: recentMeals,
+    grocery_context: {
+      has_active_list: groceryContext.has_active_list === true || queuedGroceryItems.length > 0,
+      summary: typeof groceryContext.summary === "string" ? groceryContext.summary.trim() : "",
+      queued_items: queuedGroceryItems,
+    },
   };
 
   const prompt = `You are a practical nutrition coach.
@@ -263,6 +270,8 @@ Important:
 - Treat saturated_fat_g, added_sugar_g, sodium_mg, and cholesterol_mg as upper-limit nutrients (lower is usually better).
 - Do NOT assume pantry ingredients. Avoid over-specific single recipes.
 - Give flexible meal templates with swap-friendly phrasing (e.g., "any lean protein", "any fruit", "frozen or fresh").
+- If grocery_context.has_active_list is true, prioritize recommendation options that use grocery_context.queued_items.
+- Mention queued grocery items when possible; only use non-list foods as fallback.
 
 Return STRICT JSON only with this exact shape:
 {

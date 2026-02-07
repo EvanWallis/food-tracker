@@ -856,6 +856,11 @@ export default function Home() {
           simple: true,
           low_cook_time: true,
         },
+        grocery_context: {
+          has_active_list: Boolean(groceryPlan?.items?.length),
+          summary: groceryPlan?.summary ?? "",
+          queued_items: groceryPlan?.items ?? [],
+        },
       }),
     });
 
