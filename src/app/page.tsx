@@ -353,14 +353,22 @@ const sumNutrientsForEntries = (entries: MealEntry[]) =>
     return addNutrients(acc, meta.nutrients);
   }, emptyNutrients());
 
-const getCoveragePercent = (actual: number, target: number, upperBound = false) => {
+const getCoveragePercent = (actual: number, target: number) => {
   if (!target) return 0;
-  if (upperBound) {
-    if (actual <= target) return 100;
-    const over = ((actual - target) / target) * 100;
-    return clamp(Math.round(100 - over), 0, 100);
-  }
   return clamp(Math.round((actual / target) * 100), 0, 140);
+};
+
+const getUpperBoundCoveragePercent = (actual: number, target: number) => {
+  if (!target) return 0;
+  return clamp(Math.round((actual / target) * 100), 0, 140);
+};
+
+const getUpperBoundTrafficColor = (actual: number, target: number) => {
+  if (!target) return "bg-slate-300";
+  const ratio = (actual / target) * 100;
+  if (ratio <= 70) return "bg-emerald-500";
+  if (ratio <= 100) return "bg-amber-400";
+  return "bg-rose-500";
 };
 
 const formatFeelLabel = (value: number | null) => {
@@ -1226,7 +1234,12 @@ export default function Home() {
               const isUpperBound = key === "sodium_mg";
               const actual = coverageTotals[key];
               const target = targets[key];
-              const coverage = getCoveragePercent(actual, target, isUpperBound);
+              const coverage = isUpperBound
+                ? getUpperBoundCoveragePercent(actual, target)
+                : getCoveragePercent(actual, target);
+              const color = isUpperBound
+                ? getUpperBoundTrafficColor(actual, target)
+                : getTrafficColor(coverage);
 
               return (
                 <div
@@ -1244,10 +1257,7 @@ export default function Home() {
                   </div>
                   <div className="mt-2 h-2.5 w-full rounded-full bg-slate-200/70">
                     <div
-                      className={clsx(
-                        "h-2.5 rounded-full transition-colors",
-                        getTrafficColor(coverage),
-                      )}
+                      className={clsx("h-2.5 rounded-full transition-colors", color)}
                       style={{ width: `${Math.min(coverage, 100)}%` }}
                     />
                   </div>
