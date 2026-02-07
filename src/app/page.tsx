@@ -109,6 +109,7 @@ type TargetInputs = Record<keyof NutrientTotals, string>;
 
 const PROFILE_STORAGE_KEY = "food-tracker-profile-v1";
 const TARGETS_STORAGE_KEY = "food-tracker-targets-v1";
+const GROCERY_PLAN_STORAGE_KEY = "food-tracker-grocery-plan-v1";
 
 const NUTRIENT_KEYS: Array<keyof NutrientTotals> = [
   "protein_g",
@@ -485,6 +486,39 @@ const normalizeStringList = (value: unknown, max = 4) =>
     ? value.map(String).map((item) => item.trim()).filter(Boolean).slice(0, max)
     : [];
 
+const toWeeklyFromTargets = (targets: NutrientTotals): WeeklyMacros => ({
+  protein_g: Math.round(targets.protein_g * 7),
+  carbs_g: Math.round(targets.carbs_g * 7),
+  fat_g: Math.round(targets.fat_g * 7),
+  fiber_g: Math.round(targets.fiber_g * 7),
+});
+
+const sanitizeWeeklyMacros = (value: unknown, fallback: WeeklyMacros): WeeklyMacros => {
+  const record = toRecord(value);
+  return {
+    protein_g: clamp(Math.round(toNumber(record.protein_g, fallback.protein_g)), 0, 5000),
+    carbs_g: clamp(Math.round(toNumber(record.carbs_g, fallback.carbs_g)), 0, 7000),
+    fat_g: clamp(Math.round(toNumber(record.fat_g, fallback.fat_g)), 0, 3000),
+    fiber_g: clamp(Math.round(toNumber(record.fiber_g, fallback.fiber_g)), 0, 1500),
+  };
+};
+
+const parseGroceryPlan = (value: unknown, fallbackWeekly: WeeklyMacros): GroceryPlan | null => {
+  const record = toRecord(value);
+  const items = normalizeStringList(record.items, 20);
+  if (!items.length) return null;
+
+  return {
+    summary:
+      typeof record.summary === "string"
+        ? record.summary.trim()
+        : "Simple weekly staples to support your macro targets.",
+    items,
+    weekly_macros: sanitizeWeeklyMacros(record.weekly_macros, fallbackWeekly),
+    source: record.source === "fallback" ? "fallback" : "gemini",
+  };
+};
+
 const normalizeEstimate = (value: unknown): Estimate => {
   const record =
     value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -682,9 +716,17 @@ export default function Home() {
       } else {
         setTargets(defaultTargets);
       }
+
+      const groceryRaw = window.localStorage.getItem(GROCERY_PLAN_STORAGE_KEY);
+      if (groceryRaw) {
+        const parsed = JSON.parse(groceryRaw) as unknown;
+        const fallbackWeekly = toWeeklyFromTargets(defaultTargets);
+        setGroceryPlan(parseGroceryPlan(parsed, fallbackWeekly));
+      }
     } catch {
       setProfile(DEFAULT_PROFILE);
       setTargets(computeDefaultTargets(DEFAULT_PROFILE));
+      setGroceryPlan(null);
     } finally {
       setPrefsHydrated(true);
     }
@@ -703,6 +745,15 @@ export default function Home() {
     window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
     window.localStorage.setItem(TARGETS_STORAGE_KEY, JSON.stringify(targets));
   }, [prefsHydrated, profile, targets]);
+
+  useEffect(() => {
+    if (!prefsHydrated || typeof window === "undefined") return;
+    if (groceryPlan) {
+      window.localStorage.setItem(GROCERY_PLAN_STORAGE_KEY, JSON.stringify(groceryPlan));
+      return;
+    }
+    window.localStorage.removeItem(GROCERY_PLAN_STORAGE_KEY);
+  }, [prefsHydrated, groceryPlan]);
 
   const todayKey = getDayKey(new Date());
   const selectedKey = getDayKey(selectedDate);
@@ -933,10 +984,10 @@ export default function Home() {
     }
 
     const weeklyDefaults = {
-      protein_g: committedTargets.protein_g * 7,
-      carbs_g: committedTargets.carbs_g * 7,
-      fat_g: committedTargets.fat_g * 7,
-      fiber_g: committedTargets.fiber_g * 7,
+      protein_g: Math.round(committedTargets.protein_g * 7),
+      carbs_g: Math.round(committedTargets.carbs_g * 7),
+      fat_g: Math.round(committedTargets.fat_g * 7),
+      fiber_g: Math.round(committedTargets.fiber_g * 7),
     };
     const weeklyRaw = toRecord(payload.weekly_macros);
     const items = normalizeStringList(payload.items, 14);
@@ -947,12 +998,7 @@ export default function Home() {
           ? payload.summary.trim()
           : "Simple weekly staples to support your macro targets.",
       items: items.length ? items : ["No list items returned."],
-      weekly_macros: {
-        protein_g: clamp(Math.round(toNumber(weeklyRaw.protein_g, weeklyDefaults.protein_g)), 0, 5000),
-        carbs_g: clamp(Math.round(toNumber(weeklyRaw.carbs_g, weeklyDefaults.carbs_g)), 0, 7000),
-        fat_g: clamp(Math.round(toNumber(weeklyRaw.fat_g, weeklyDefaults.fat_g)), 0, 3000),
-        fiber_g: clamp(Math.round(toNumber(weeklyRaw.fiber_g, weeklyDefaults.fiber_g)), 0, 1500),
-      },
+      weekly_macros: sanitizeWeeklyMacros(weeklyRaw, weeklyDefaults),
       source: payload.source === "fallback" ? "fallback" : "gemini",
     });
   };
