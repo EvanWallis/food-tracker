@@ -659,8 +659,10 @@ export default function Home() {
   const [isGeneratingGrocery, setIsGeneratingGrocery] = useState(false);
   const [groceryError, setGroceryError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(() => new Date());
-  const [useCurrentIngredients, setUseCurrentIngredients] = useState(false);
-  const [currentIngredientsText, setCurrentIngredientsText] = useState("");
+  const [plannerIngredientsText, setPlannerIngredientsText] = useState("");
+  const [plannerEstimate, setPlannerEstimate] = useState<Estimate | null>(null);
+  const [plannerError, setPlannerError] = useState<string | null>(null);
+  const [isPlanningMeal, setIsPlanningMeal] = useState(false);
 
   const loadData = async () => {
     const [entriesResponse, settingsResponse] = await Promise.all([
@@ -748,18 +750,23 @@ export default function Home() {
 
       const ingredientsRaw = window.localStorage.getItem(INGREDIENT_CONTEXT_STORAGE_KEY);
       if (ingredientsRaw) {
-        const parsed = toRecord(JSON.parse(ingredientsRaw));
-        setUseCurrentIngredients(parsed.enabled === true);
-        if (typeof parsed.text === "string") {
-          setCurrentIngredientsText(parsed.text);
+        const parsed = JSON.parse(ingredientsRaw) as unknown;
+        if (typeof parsed === "string") {
+          setPlannerIngredientsText(parsed);
+        } else {
+          const parsedRecord = toRecord(parsed);
+          if (typeof parsedRecord.text === "string") {
+            setPlannerIngredientsText(parsedRecord.text);
+          }
         }
       }
     } catch {
       setProfile(DEFAULT_PROFILE);
       setTargets(computeDefaultTargets(DEFAULT_PROFILE));
       setGroceryPlan(null);
-      setUseCurrentIngredients(false);
-      setCurrentIngredientsText("");
+      setPlannerIngredientsText("");
+      setPlannerEstimate(null);
+      setPlannerError(null);
     } finally {
       setPrefsHydrated(true);
     }
@@ -790,16 +797,16 @@ export default function Home() {
 
   useEffect(() => {
     if (!prefsHydrated || typeof window === "undefined") return;
-    const trimmed = currentIngredientsText.trim();
-    if (!useCurrentIngredients && !trimmed) {
+    const trimmed = plannerIngredientsText.trim();
+    if (!trimmed) {
       window.localStorage.removeItem(INGREDIENT_CONTEXT_STORAGE_KEY);
       return;
     }
     window.localStorage.setItem(
       INGREDIENT_CONTEXT_STORAGE_KEY,
-      JSON.stringify({ enabled: useCurrentIngredients, text: trimmed }),
+      JSON.stringify({ text: trimmed }),
     );
-  }, [prefsHydrated, useCurrentIngredients, currentIngredientsText]);
+  }, [prefsHydrated, plannerIngredientsText]);
 
   const todayKey = getDayKey(new Date());
   const selectedKey = getDayKey(selectedDate);
@@ -930,15 +937,8 @@ export default function Home() {
     const committedProfile = commitProfileInputs();
     const committedTargets = commitTargetInputs();
     const mealText = draft.mealText.trim();
-    const availableIngredients = useCurrentIngredients
-      ? parseIngredientText(currentIngredientsText, 30)
-      : [];
-    if (!mealText && (!useCurrentIngredients || !availableIngredients.length)) {
-      setError(
-        useCurrentIngredients
-          ? "Add ingredients on hand (or a meal) before analyzing."
-          : "Add what you ate before analyzing.",
-      );
+    if (!mealText) {
+      setError("Add what you ate before analyzing.");
       return;
     }
 
@@ -982,8 +982,8 @@ export default function Home() {
           queued_items: groceryPlan?.items ?? [],
         },
         ingredient_context: {
-          enabled: useCurrentIngredients,
-          available_ingredients: availableIngredients,
+          enabled: false,
+          available_ingredients: [],
         },
       }),
     });
@@ -1019,7 +1019,77 @@ export default function Home() {
         confidence: normalized.confidence,
       },
     }));
-    setReadyToSave(Boolean(mealText));
+    setReadyToSave(true);
+  };
+
+  const runPlannerEstimate = async () => {
+    setPlannerError(null);
+    const committedProfile = commitProfileInputs();
+    const committedTargets = commitTargetInputs();
+    const availableIngredients = parseIngredientText(plannerIngredientsText, 30);
+    if (!availableIngredients.length) {
+      setPlannerError("Add at least one ingredient before planning.");
+      return;
+    }
+
+    const recentMeals = todayEntries.slice(0, 6).map((entry) => ({
+      meal_text: entry.mealText,
+      optimal_score: entry.wholeFoodsPercent,
+      feel_after: parseEntryMeta(entry.notes)?.feel_after ?? null,
+    }));
+
+    setIsPlanningMeal(true);
+    const response = await fetch("/api/estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mealText: "",
+        profile: {
+          age: committedProfile.age,
+          sex: committedProfile.sex,
+          height_ft: committedProfile.heightFt,
+          height_in: committedProfile.heightIn,
+          weight_lbs: committedProfile.weightLbs,
+          average_steps_day: committedProfile.avgSteps,
+        },
+        targets: { ...committedTargets, optimal_goal: optimalGoal },
+        day_context: {
+          date: todayKey,
+          meal_count: todayEntries.length,
+          daily_optimal_average: todayAverage,
+          nutrients_consumed: todayTotals,
+          feel_average: todayFeelAverage,
+          recent_meals: recentMeals,
+        },
+        recommendation_preferences: {
+          simple: true,
+          low_cook_time: true,
+        },
+        grocery_context: {
+          has_active_list: Boolean(groceryPlan?.items?.length),
+          summary: groceryPlan?.summary ?? "",
+          queued_items: groceryPlan?.items ?? [],
+        },
+        ingredient_context: {
+          enabled: true,
+          available_ingredients: availableIngredients,
+        },
+      }),
+    });
+    setIsPlanningMeal(false);
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      const message =
+        typeof payload.error === "string"
+          ? payload.error
+          : "Could not plan your next meal right now.";
+      setPlannerError(message);
+      return;
+    }
+
+    const normalized = normalizeEstimate(await response.json());
+    setPlannerEstimate(normalized);
   };
 
   const runGroceryPlan = async () => {
@@ -1132,15 +1202,23 @@ export default function Home() {
     invalidateEstimate();
   };
 
+  const handlePlannerIngredientsChange = (value: string) => {
+    setPlannerIngredientsText(value);
+    if (plannerError) setPlannerError(null);
+    if (plannerEstimate) setPlannerEstimate(null);
+  };
+
   const hasMealText = Boolean(draft.mealText.trim());
   const canSaveAnalyzedMeal = readyToSave && hasMealText;
-  const analyzeButtonLabel = isEstimating
+  const mealActionLabel = isEstimating
     ? "Analyzing..."
     : canSaveAnalyzedMeal
       ? "Save meal"
-      : useCurrentIngredients
-        ? "Analyze ingredients"
-        : "Analyze meal";
+      : "Analyze meal";
+  const plannerCoverage = useMemo(() => {
+    if (!plannerEstimate || !optimalGoal) return 0;
+    return clamp(Math.round((plannerEstimate.optimal_score / optimalGoal) * 100), 0, 160);
+  }, [plannerEstimate, optimalGoal]);
 
   const handleGoalSave = async () => {
     await fetch("/api/settings", {
@@ -1491,105 +1569,48 @@ export default function Home() {
         <section className="rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-[0_22px_50px_rgba(15,23,42,0.1)]">
           <form onSubmit={handleSubmit} className="space-y-5">
             <label className="flex flex-col gap-2 text-xs uppercase tracking-[0.2em] text-slate-500">
-              {useCurrentIngredients ? "Meal (optional)" : "Meal"}
+              Meal
               <textarea
                 rows={5}
                 value={draft.mealText}
                 onChange={(event) => handleMealChange(event.target.value)}
-                placeholder={
-                  useCurrentIngredients
-                    ? "Optional: what you just ate..."
-                    : "Type what you ate in plain English..."
-                }
-                required={!useCurrentIngredients}
+                placeholder="Type what you ate in plain English..."
+                required
                 className="min-h-[150px] rounded-2xl border border-slate-200 bg-slate-50/40 px-4 py-3 text-base text-slate-900"
               />
             </label>
 
-            <div className="rounded-2xl border border-slate-200/80 bg-slate-50/60 px-4 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                    Use Current Ingredients
-                  </p>
-                  <p className="mt-1 text-xs text-slate-600">
-                    Keep this on to tailor the next meal to foods you already have.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={useCurrentIngredients}
-                  onClick={() => {
-                    setUseCurrentIngredients((prev) => !prev);
-                    invalidateEstimate();
-                  }}
-                  className={clsx(
-                    "relative h-7 w-12 rounded-full transition-colors",
-                    useCurrentIngredients ? "bg-emerald-500" : "bg-slate-300",
-                  )}
-                >
-                  <span
-                    className={clsx(
-                      "absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-transform",
-                      useCurrentIngredients ? "translate-x-6" : "translate-x-1",
-                    )}
-                  />
-                </button>
-              </div>
-
-              {useCurrentIngredients ? (
-                <label className="mt-3 flex flex-col gap-2 text-xs uppercase tracking-[0.2em] text-slate-500">
-                  Ingredients On Hand
-                  <textarea
-                    rows={3}
-                    value={currentIngredientsText}
-                    onChange={(event) => {
-                      setCurrentIngredientsText(event.target.value);
-                      invalidateEstimate();
-                    }}
-                    placeholder="Eggs, chicken, rice, spinach, Greek yogurt..."
-                    className="min-h-[90px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900"
-                  />
-                </label>
-              ) : null}
-            </div>
-
-            {!useCurrentIngredients ? (
-              <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.2em] text-slate-500">
-                How did you feel after this meal?
-                <select
-                  value={draft.feelAfter ?? ""}
-                  onChange={(event) => {
-                    const value = event.target.value ? Number(event.target.value) : null;
-                    setDraft((prev) => ({
-                      ...prev,
-                      feelAfter: value && Number.isFinite(value) ? clamp(value, 1, 5) : null,
-                      meta: prev.meta
-                        ? {
-                            ...prev.meta,
-                            feel_after:
-                              value && Number.isFinite(value) ? clamp(value, 1, 5) : null,
-                          }
-                        : prev.meta,
-                    }));
-                  }}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
-                >
-                  <option value="">Not rated</option>
-                  <option value="1">1 - Very bad</option>
-                  <option value="2">2 - Low energy</option>
-                  <option value="3">3 - Neutral</option>
-                  <option value="4">4 - Pretty good</option>
-                  <option value="5">5 - Great</option>
-                </select>
-              </label>
-            ) : null}
+            <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.2em] text-slate-500">
+              How did you feel after this meal?
+              <select
+                value={draft.feelAfter ?? ""}
+                onChange={(event) => {
+                  const value = event.target.value ? Number(event.target.value) : null;
+                  setDraft((prev) => ({
+                    ...prev,
+                    feelAfter: value && Number.isFinite(value) ? clamp(value, 1, 5) : null,
+                    meta: prev.meta
+                      ? {
+                          ...prev.meta,
+                          feel_after: value && Number.isFinite(value) ? clamp(value, 1, 5) : null,
+                        }
+                      : prev.meta,
+                  }));
+                }}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+              >
+                <option value="">Not rated</option>
+                <option value="1">1 - Very bad</option>
+                <option value="2">2 - Low energy</option>
+                <option value="3">3 - Neutral</option>
+                <option value="4">4 - Pretty good</option>
+                <option value="5">5 - Great</option>
+              </select>
+            </label>
 
             <p className="text-xs text-slate-600">
               AI uses your profile, nutrient targets, and today&apos;s logged meals for tailored
-              recommendations (defaulting to simple, low-cook next meals). With ingredients mode
-              on, recommendations prioritize what you currently have.
+              recommendations (defaulting to simple, low-cook next meals).
             </p>
 
             {estimate ? (
@@ -1699,7 +1720,7 @@ export default function Home() {
                     : "bg-slate-900 hover:bg-slate-800",
                 )}
               >
-                {analyzeButtonLabel}
+                {mealActionLabel}
               </button>
               {canSaveAnalyzedMeal ? (
                 <button
@@ -1720,6 +1741,105 @@ export default function Home() {
             </div>
           </form>
         </section>
+
+        <details className="rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.1)]">
+          <summary className="cursor-pointer list-none">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-display text-2xl text-slate-900">Meal Planner</h2>
+              <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                open
+              </span>
+            </div>
+          </summary>
+          <p className="mt-2 text-xs text-slate-500">
+            Enter ingredients you have, then get a simple next-meal recommendation optimized for
+            today&apos;s macro and micronutrient gaps.
+          </p>
+          <label className="mt-3 flex flex-col gap-2 text-xs uppercase tracking-[0.2em] text-slate-500">
+            Ingredients On Hand
+            <textarea
+              rows={4}
+              value={plannerIngredientsText}
+              onChange={(event) => handlePlannerIngredientsChange(event.target.value)}
+              placeholder="Eggs, chicken thigh, apple, tortillas, shredded cheese..."
+              className="min-h-[110px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900"
+            />
+          </label>
+
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={runPlannerEstimate}
+              disabled={isPlanningMeal}
+              className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+            >
+              {isPlanningMeal ? "Analyzing..." : "Analyze planner"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPlannerIngredientsText("");
+                setPlannerEstimate(null);
+                setPlannerError(null);
+              }}
+              className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs uppercase tracking-[0.2em] text-slate-600 hover:bg-slate-100"
+            >
+              Clear
+            </button>
+          </div>
+
+          {plannerError ? <p className="mt-3 text-sm text-rose-600">{plannerError}</p> : null}
+
+          {plannerEstimate ? (
+            <div className="mt-4 rounded-2xl border border-slate-200/80 bg-slate-50/70 px-4 py-4 text-sm text-slate-900">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Planner Insight</p>
+              <div className="mt-2 flex items-center justify-between gap-3">
+                <p className="text-lg font-semibold text-slate-900">
+                  {plannerEstimate.optimal_score}% optimal
+                </p>
+                <span className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                  {plannerEstimate.confidence} confidence
+                </span>
+              </div>
+              <div className="mt-2 h-2.5 w-full rounded-full bg-slate-200/70">
+                <div
+                  className={clsx("h-2.5 rounded-full transition-colors", getTrafficColor(plannerCoverage))}
+                  style={{ width: `${Math.min(plannerCoverage, 100)}%` }}
+                />
+              </div>
+              <p className="mt-2 text-sm text-slate-900">{plannerEstimate.summary}</p>
+
+              <div className="mt-3 rounded-xl border border-emerald-200/80 bg-emerald-50/70 px-3 py-3">
+                <p className="text-xs uppercase tracking-[0.2em] text-emerald-700">
+                  Best next meal
+                </p>
+                <p className="mt-1 text-sm text-slate-900">
+                  {plannerEstimate.recommendation || "No recommendation returned."}
+                </p>
+                {plannerEstimate.recommendation_options.length ? (
+                  <div className="mt-2 space-y-1">
+                    {plannerEstimate.recommendation_options.map((option, index) => (
+                      <p key={option} className="text-xs text-slate-700">
+                        {index + 1}. {option}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                {ESTIMATE_HIGHLIGHT_KEYS.map((key) => (
+                  <div key={key} className="rounded-xl border border-slate-200/80 bg-white px-2 py-2">
+                    <p className="uppercase tracking-[0.15em] text-slate-500">{NUTRIENT_LABELS[key]}</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-900">
+                      {Math.round(plannerEstimate.nutrients[key])} {NUTRIENT_UNITS[key]}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </details>
 
         <details className="rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.1)]">
           <summary className="cursor-pointer list-none">
