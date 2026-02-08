@@ -876,7 +876,7 @@ export default function Home() {
   };
 
   const invalidateEstimate = () => {
-    if (!readyToSave) return;
+    if (!readyToSave && !estimate) return;
     setReadyToSave(false);
     setEstimate(null);
     setDraft((prev) => ({
@@ -930,10 +930,17 @@ export default function Home() {
     const committedProfile = commitProfileInputs();
     const committedTargets = commitTargetInputs();
     const mealText = draft.mealText.trim();
-    if (!mealText) return;
     const availableIngredients = useCurrentIngredients
       ? parseIngredientText(currentIngredientsText, 30)
       : [];
+    if (!mealText && (!useCurrentIngredients || !availableIngredients.length)) {
+      setError(
+        useCurrentIngredients
+          ? "Add ingredients on hand (or a meal) before analyzing."
+          : "Add what you ate before analyzing.",
+      );
+      return;
+    }
 
     const recentMeals = todayEntries.slice(0, 6).map((entry) => ({
       meal_text: entry.mealText,
@@ -1012,7 +1019,7 @@ export default function Home() {
         confidence: normalized.confidence,
       },
     }));
-    setReadyToSave(true);
+    setReadyToSave(Boolean(mealText));
   };
 
   const runGroceryPlan = async () => {
@@ -1072,14 +1079,13 @@ export default function Home() {
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+    const mealText = draft.mealText.trim();
+    const canSaveSubmittedMeal = readyToSave && Boolean(mealText);
 
-    if (!readyToSave) {
+    if (!canSaveSubmittedMeal) {
       await runEstimate();
       return;
     }
-
-    const mealText = draft.mealText.trim();
-    if (!mealText) return;
 
     const meta: EntryMetaV2 = {
       version: 2,
@@ -1125,6 +1131,16 @@ export default function Home() {
     }));
     invalidateEstimate();
   };
+
+  const hasMealText = Boolean(draft.mealText.trim());
+  const canSaveAnalyzedMeal = readyToSave && hasMealText;
+  const analyzeButtonLabel = isEstimating
+    ? "Analyzing..."
+    : canSaveAnalyzedMeal
+      ? "Save meal"
+      : useCurrentIngredients
+        ? "Analyze ingredients"
+        : "Analyze meal";
 
   const handleGoalSave = async () => {
     await fetch("/api/settings", {
@@ -1475,19 +1491,23 @@ export default function Home() {
         <section className="rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-[0_22px_50px_rgba(15,23,42,0.1)]">
           <form onSubmit={handleSubmit} className="space-y-5">
             <label className="flex flex-col gap-2 text-xs uppercase tracking-[0.2em] text-slate-500">
-              Meal
+              {useCurrentIngredients ? "Meal (optional)" : "Meal"}
               <textarea
                 rows={5}
                 value={draft.mealText}
                 onChange={(event) => handleMealChange(event.target.value)}
-                placeholder="Type what you ate in plain English..."
-                required
+                placeholder={
+                  useCurrentIngredients
+                    ? "Optional: what you just ate..."
+                    : "Type what you ate in plain English..."
+                }
+                required={!useCurrentIngredients}
                 className="min-h-[150px] rounded-2xl border border-slate-200 bg-slate-50/40 px-4 py-3 text-base text-slate-900"
               />
             </label>
 
             <div className="rounded-2xl border border-slate-200/80 bg-slate-50/60 px-4 py-3">
-              <label className="flex cursor-pointer items-center justify-between gap-3">
+              <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
                     Use Current Ingredients
@@ -1496,16 +1516,27 @@ export default function Home() {
                     Keep this on to tailor the next meal to foods you already have.
                   </p>
                 </div>
-                <input
-                  type="checkbox"
-                  checked={useCurrentIngredients}
-                  onChange={(event) => {
-                    setUseCurrentIngredients(event.target.checked);
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={useCurrentIngredients}
+                  onClick={() => {
+                    setUseCurrentIngredients((prev) => !prev);
                     invalidateEstimate();
                   }}
-                  className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
-                />
-              </label>
+                  className={clsx(
+                    "relative h-7 w-12 rounded-full transition-colors",
+                    useCurrentIngredients ? "bg-emerald-500" : "bg-slate-300",
+                  )}
+                >
+                  <span
+                    className={clsx(
+                      "absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-transform",
+                      useCurrentIngredients ? "translate-x-6" : "translate-x-1",
+                    )}
+                  />
+                </button>
+              </div>
 
               {useCurrentIngredients ? (
                 <label className="mt-3 flex flex-col gap-2 text-xs uppercase tracking-[0.2em] text-slate-500">
@@ -1524,34 +1555,36 @@ export default function Home() {
               ) : null}
             </div>
 
-            <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.2em] text-slate-500">
-              How did you feel after this meal?
-              <select
-                value={draft.feelAfter ?? ""}
-                onChange={(event) => {
-                  const value = event.target.value ? Number(event.target.value) : null;
-                  setDraft((prev) => ({
-                    ...prev,
-                    feelAfter: value && Number.isFinite(value) ? clamp(value, 1, 5) : null,
-                    meta: prev.meta
-                      ? {
-                          ...prev.meta,
-                          feel_after:
-                            value && Number.isFinite(value) ? clamp(value, 1, 5) : null,
-                        }
-                      : prev.meta,
-                  }));
-                }}
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
-              >
-                <option value="">Not rated</option>
-                <option value="1">1 - Very bad</option>
-                <option value="2">2 - Low energy</option>
-                <option value="3">3 - Neutral</option>
-                <option value="4">4 - Pretty good</option>
-                <option value="5">5 - Great</option>
-              </select>
-            </label>
+            {!useCurrentIngredients ? (
+              <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.2em] text-slate-500">
+                How did you feel after this meal?
+                <select
+                  value={draft.feelAfter ?? ""}
+                  onChange={(event) => {
+                    const value = event.target.value ? Number(event.target.value) : null;
+                    setDraft((prev) => ({
+                      ...prev,
+                      feelAfter: value && Number.isFinite(value) ? clamp(value, 1, 5) : null,
+                      meta: prev.meta
+                        ? {
+                            ...prev.meta,
+                            feel_after:
+                              value && Number.isFinite(value) ? clamp(value, 1, 5) : null,
+                          }
+                        : prev.meta,
+                    }));
+                  }}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+                >
+                  <option value="">Not rated</option>
+                  <option value="1">1 - Very bad</option>
+                  <option value="2">2 - Low energy</option>
+                  <option value="3">3 - Neutral</option>
+                  <option value="4">4 - Pretty good</option>
+                  <option value="5">5 - Great</option>
+                </select>
+              </label>
+            ) : null}
 
             <p className="text-xs text-slate-600">
               AI uses your profile, nutrient targets, and today&apos;s logged meals for tailored
@@ -1661,14 +1694,14 @@ export default function Home() {
                 disabled={isEstimating}
                 className={clsx(
                   "rounded-full px-4 py-2 text-sm font-semibold text-white shadow-sm transition",
-                  readyToSave
+                  canSaveAnalyzedMeal
                     ? "bg-emerald-600 hover:bg-emerald-700"
                     : "bg-slate-900 hover:bg-slate-800",
                 )}
               >
-                {isEstimating ? "Analyzing..." : readyToSave ? "Save meal" : "Analyze meal"}
+                {analyzeButtonLabel}
               </button>
-              {readyToSave ? (
+              {canSaveAnalyzedMeal ? (
                 <button
                   type="button"
                   onClick={runEstimate}

@@ -175,10 +175,6 @@ export async function POST(request: Request) {
   const payload = toRecord(body);
   const mealText = typeof payload.mealText === "string" ? payload.mealText.trim() : "";
 
-  if (!mealText) {
-    return NextResponse.json({ error: "Meal text is required." }, { status: 400 });
-  }
-
   const profile = toRecord(payload.profile);
   const targets = toRecord(payload.targets);
   const dayContext = toRecord(payload.day_context);
@@ -237,6 +233,19 @@ export async function POST(request: Request) {
     : [];
   const queuedGroceryItems = normalizeStringList(groceryContext.queued_items, 20);
   const availableIngredientItems = normalizeStringList(ingredientContext.available_ingredients, 30);
+  const ingredientPlanningEnabled =
+    ingredientContext.enabled === true && availableIngredientItems.length > 0;
+  const planningMode = !mealText && ingredientPlanningEnabled;
+
+  if (!mealText && !ingredientPlanningEnabled) {
+    return NextResponse.json(
+      {
+        error:
+          "Meal text is required unless ingredient mode is enabled with ingredients on hand.",
+      },
+      { status: 400 },
+    );
+  }
 
   const normalizedContext = {
     date: typeof dayContext.date === "string" ? dayContext.date : "",
@@ -264,12 +273,13 @@ export async function POST(request: Request) {
   const prompt = `You are a practical nutrition coach.
 
 Your task:
-Estimate this meal's nutrients and score how well it fits today's needs.
+- If meal_text is provided: estimate this meal's nutrients and score how well it fits today's needs.
+- If planning_mode is true: propose the best next meal from available ingredients to close today's macro/micro gaps, and estimate that planned meal.
 
 Important:
 - Be directionally useful, not medically exact.
 - Use the user's profile, targets, and what they already ate today.
-- The recommendation must be tailored to today's gaps/excesses after this meal.
+- The recommendation must be tailored to today's gaps/excesses after this meal (or after the planned meal in planning_mode).
 - Keep wording clear and actionable.
 - For recommendation, default to SIMPLE and LOW COOK TIME meals.
 - Prefer fast options: minimal ingredients, short prep, microwave/assembly/no-cook if possible.
@@ -282,6 +292,7 @@ Important:
 - When ingredient mode is enabled, keep options simple and low-cook using ingredients already listed, not exact recipes.
 - If listed ingredients cannot fully cover a key gap, still give the best-with-current-ingredients option and note one optional add-on ingredient.
 - Avoid fish, tofu, tempeh, beans, lentils, and chickpeas unless they are explicitly present in day_context.ingredient_context.available_ingredients.
+- In planning_mode, prioritize the "recommendation" and "recommendation_options" as the main output and keep "summary" focused on why this best closes today's gaps.
 
 Return STRICT JSON only with this exact shape:
 {
@@ -331,6 +342,7 @@ Context JSON:
 ${JSON.stringify(
   {
     meal_text: mealText,
+    planning_mode: planningMode,
     profile: normalizedProfile,
     targets: { ...normalizedTargets, optimal_goal: optimalGoal },
     day_context: normalizedContext,
