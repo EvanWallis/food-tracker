@@ -110,6 +110,7 @@ type TargetInputs = Record<keyof NutrientTotals, string>;
 const PROFILE_STORAGE_KEY = "food-tracker-profile-v1";
 const TARGETS_STORAGE_KEY = "food-tracker-targets-v1";
 const GROCERY_PLAN_STORAGE_KEY = "food-tracker-grocery-plan-v1";
+const INGREDIENT_CONTEXT_STORAGE_KEY = "food-tracker-ingredient-context-v1";
 
 const NUTRIENT_KEYS: Array<keyof NutrientTotals> = [
   "protein_g",
@@ -486,6 +487,25 @@ const normalizeStringList = (value: unknown, max = 4) =>
     ? value.map(String).map((item) => item.trim()).filter(Boolean).slice(0, max)
     : [];
 
+const parseIngredientText = (value: string, max = 30) => {
+  const items: string[] = [];
+  const seen = new Set<string>();
+
+  value
+    .split(/[\n,;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .forEach((item) => {
+      if (items.length >= max) return;
+      const key = item.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      items.push(item);
+    });
+
+  return items;
+};
+
 const toWeeklyFromTargets = (targets: NutrientTotals): WeeklyMacros => ({
   protein_g: Math.round(targets.protein_g * 7),
   carbs_g: Math.round(targets.carbs_g * 7),
@@ -639,6 +659,8 @@ export default function Home() {
   const [isGeneratingGrocery, setIsGeneratingGrocery] = useState(false);
   const [groceryError, setGroceryError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(() => new Date());
+  const [useCurrentIngredients, setUseCurrentIngredients] = useState(false);
+  const [currentIngredientsText, setCurrentIngredientsText] = useState("");
 
   const loadData = async () => {
     const [entriesResponse, settingsResponse] = await Promise.all([
@@ -723,10 +745,21 @@ export default function Home() {
         const fallbackWeekly = toWeeklyFromTargets(defaultTargets);
         setGroceryPlan(parseGroceryPlan(parsed, fallbackWeekly));
       }
+
+      const ingredientsRaw = window.localStorage.getItem(INGREDIENT_CONTEXT_STORAGE_KEY);
+      if (ingredientsRaw) {
+        const parsed = toRecord(JSON.parse(ingredientsRaw));
+        setUseCurrentIngredients(parsed.enabled === true);
+        if (typeof parsed.text === "string") {
+          setCurrentIngredientsText(parsed.text);
+        }
+      }
     } catch {
       setProfile(DEFAULT_PROFILE);
       setTargets(computeDefaultTargets(DEFAULT_PROFILE));
       setGroceryPlan(null);
+      setUseCurrentIngredients(false);
+      setCurrentIngredientsText("");
     } finally {
       setPrefsHydrated(true);
     }
@@ -754,6 +787,19 @@ export default function Home() {
     }
     window.localStorage.removeItem(GROCERY_PLAN_STORAGE_KEY);
   }, [prefsHydrated, groceryPlan]);
+
+  useEffect(() => {
+    if (!prefsHydrated || typeof window === "undefined") return;
+    const trimmed = currentIngredientsText.trim();
+    if (!useCurrentIngredients && !trimmed) {
+      window.localStorage.removeItem(INGREDIENT_CONTEXT_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(
+      INGREDIENT_CONTEXT_STORAGE_KEY,
+      JSON.stringify({ enabled: useCurrentIngredients, text: trimmed }),
+    );
+  }, [prefsHydrated, useCurrentIngredients, currentIngredientsText]);
 
   const todayKey = getDayKey(new Date());
   const selectedKey = getDayKey(selectedDate);
@@ -829,6 +875,19 @@ export default function Home() {
     setReadyToSave(false);
   };
 
+  const invalidateEstimate = () => {
+    if (!readyToSave) return;
+    setReadyToSave(false);
+    setEstimate(null);
+    setDraft((prev) => ({
+      ...prev,
+      llmReason: "",
+      sizeLabel: null,
+      sizeWeight: null,
+      meta: null,
+    }));
+  };
+
   const commitProfileInputs = () => {
     const next: NutritionProfile = {
       ...profile,
@@ -872,6 +931,9 @@ export default function Home() {
     const committedTargets = commitTargetInputs();
     const mealText = draft.mealText.trim();
     if (!mealText) return;
+    const availableIngredients = useCurrentIngredients
+      ? parseIngredientText(currentIngredientsText, 30)
+      : [];
 
     const recentMeals = todayEntries.slice(0, 6).map((entry) => ({
       meal_text: entry.mealText,
@@ -911,6 +973,10 @@ export default function Home() {
           has_active_list: Boolean(groceryPlan?.items?.length),
           summary: groceryPlan?.summary ?? "",
           queued_items: groceryPlan?.items ?? [],
+        },
+        ingredient_context: {
+          enabled: useCurrentIngredients,
+          available_ingredients: availableIngredients,
         },
       }),
     });
@@ -1057,18 +1123,7 @@ export default function Home() {
       ...prev,
       mealText: value,
     }));
-
-    if (readyToSave) {
-      setReadyToSave(false);
-      setEstimate(null);
-      setDraft((prev) => ({
-        ...prev,
-        llmReason: "",
-        sizeLabel: null,
-        sizeWeight: null,
-        meta: null,
-      }));
-    }
+    invalidateEstimate();
   };
 
   const handleGoalSave = async () => {
@@ -1431,6 +1486,44 @@ export default function Home() {
               />
             </label>
 
+            <div className="rounded-2xl border border-slate-200/80 bg-slate-50/60 px-4 py-3">
+              <label className="flex cursor-pointer items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                    Use Current Ingredients
+                  </p>
+                  <p className="mt-1 text-xs text-slate-600">
+                    Keep this on to tailor the next meal to foods you already have.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={useCurrentIngredients}
+                  onChange={(event) => {
+                    setUseCurrentIngredients(event.target.checked);
+                    invalidateEstimate();
+                  }}
+                  className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
+                />
+              </label>
+
+              {useCurrentIngredients ? (
+                <label className="mt-3 flex flex-col gap-2 text-xs uppercase tracking-[0.2em] text-slate-500">
+                  Ingredients On Hand
+                  <textarea
+                    rows={3}
+                    value={currentIngredientsText}
+                    onChange={(event) => {
+                      setCurrentIngredientsText(event.target.value);
+                      invalidateEstimate();
+                    }}
+                    placeholder="Eggs, chicken, rice, spinach, Greek yogurt..."
+                    className="min-h-[90px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900"
+                  />
+                </label>
+              ) : null}
+            </div>
+
             <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.2em] text-slate-500">
               How did you feel after this meal?
               <select
@@ -1462,7 +1555,8 @@ export default function Home() {
 
             <p className="text-xs text-slate-600">
               AI uses your profile, nutrient targets, and today&apos;s logged meals for tailored
-              recommendations (defaulting to simple, low-cook next meals).
+              recommendations (defaulting to simple, low-cook next meals). With ingredients mode
+              on, recommendations prioritize what you currently have.
             </p>
 
             {estimate ? (

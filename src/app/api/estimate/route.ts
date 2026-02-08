@@ -184,6 +184,7 @@ export async function POST(request: Request) {
   const dayContext = toRecord(payload.day_context);
   const recommendationPreferences = toRecord(payload.recommendation_preferences);
   const groceryContext = toRecord(payload.grocery_context);
+  const ingredientContext = toRecord(payload.ingredient_context);
 
   const heightCmFromImperial = (() => {
     const feet = clamp(Math.round(toNumber(profile.height_ft ?? profile.heightFt, 5)), 3, 8);
@@ -235,6 +236,7 @@ export async function POST(request: Request) {
         .slice(0, 8)
     : [];
   const queuedGroceryItems = normalizeStringList(groceryContext.queued_items, 20);
+  const availableIngredientItems = normalizeStringList(ingredientContext.available_ingredients, 30);
 
   const normalizedContext = {
     date: typeof dayContext.date === "string" ? dayContext.date : "",
@@ -252,6 +254,10 @@ export async function POST(request: Request) {
       has_active_list: groceryContext.has_active_list === true || queuedGroceryItems.length > 0,
       summary: typeof groceryContext.summary === "string" ? groceryContext.summary.trim() : "",
       queued_items: queuedGroceryItems,
+    },
+    ingredient_context: {
+      enabled: ingredientContext.enabled === true,
+      available_ingredients: availableIngredientItems,
     },
   };
 
@@ -272,6 +278,10 @@ Important:
 - Give flexible meal templates with swap-friendly phrasing (e.g., "any lean protein", "any fruit", "frozen or fresh").
 - If grocery_context.has_active_list is true, prioritize recommendation options that use grocery_context.queued_items.
 - Mention queued grocery items when possible; only use non-list foods as fallback.
+- If day_context.ingredient_context.enabled is true and day_context.ingredient_context.available_ingredients has items, prioritize those ingredients in the recommendation and options.
+- When ingredient mode is enabled, keep options simple and low-cook using ingredients already listed, not exact recipes.
+- If listed ingredients cannot fully cover a key gap, still give the best-with-current-ingredients option and note one optional add-on ingredient.
+- Avoid fish, tofu, tempeh, beans, lentils, and chickpeas unless they are explicitly present in day_context.ingredient_context.available_ingredients.
 
 Return STRICT JSON only with this exact shape:
 {
